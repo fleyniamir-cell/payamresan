@@ -11,6 +11,7 @@ const COMPLEX_MARKDOWN_INLINE_PATTERN = /[`*_#[\]()>|~]/;
 const COMPLEX_MARKDOWN_LINE_PATTERN = /(^|\n)\s*(?:[-+*]\s+|\d+\.\s+|>)/;
 const MAX_CACHE_ENTRIES = 350;
 const MAX_CACHEABLE_TEXT_LENGTH = 8192;
+const BLANK_LINE_MARKER = "[[SB_BLANK_LINE]]";
 
 const blockCache = new Map();
 const inlineCache = new Map();
@@ -52,6 +53,9 @@ const escapeHtml = (value) =>
     }
   });
 
+const escapeRegex = (value) =>
+  String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const normalizeMarkdownInput = (value) => {
   if (typeof value === "string") return value;
   if (value && typeof value === "object") {
@@ -77,6 +81,33 @@ const containsFencedCode = (value) =>
 
 const normalizeFenceIndentation = (value) =>
   String(value || "").replace(/(^|\n)[ \t]+(?=```|~~~)/g, "$1");
+
+const preserveMarkdownBlankLines = (value) => {
+  const source = String(value || "");
+  if (!source.includes("\n\n")) return source;
+  const fencePattern = /(^|\n)(```|~~~)[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g;
+  let lastIndex = 0;
+  let result = "";
+  let match;
+
+  const expandBlankLines = (segment) =>
+    segment.replace(/\n{2,}/g, (run) => {
+      const extraBreakCount = run.length - 1;
+      const spacerBlocks = `${BLANK_LINE_MARKER}\n\n`.repeat(extraBreakCount);
+      return `\n\n${spacerBlocks}`;
+    });
+
+  while ((match = fencePattern.exec(source))) {
+    const fenceStart = match.index;
+    const fenceText = match[0];
+    result += expandBlankLines(source.slice(lastIndex, fenceStart));
+    result += fenceText;
+    lastIndex = fenceStart + fenceText.length;
+  }
+
+  result += expandBlankLines(source.slice(lastIndex));
+  return result;
+};
 
 const coerceHtmlString = (value) => {
   if (typeof value === "string") return value;
@@ -326,8 +357,24 @@ const cleanupMarkdownHtml = (html) =>
     .replace(/(<br\s*\/?>\s*)+$/gi, "")
     .trim();
 
-const fallbackBlockHtml = (raw) =>
-  escapeHtml(raw).replace(/\n/g, "<br />");
+const restoreMarkdownBlankLines = (html) =>
+  String(html || "").replace(
+    new RegExp(`<p>${escapeRegex(BLANK_LINE_MARKER)}</p>`, "g"),
+    '<div class="sb-markdown-spacer" aria-hidden="true"></div>',
+  );
+
+const restoreFallbackMarkdownBlankLines = (raw) =>
+  String(raw || "").replace(
+    new RegExp(`\\n\\n(?:${escapeRegex(BLANK_LINE_MARKER)}\\n\\n)+`, "g"),
+    (run) => "\n".repeat(run.split(BLANK_LINE_MARKER).length),
+  );
+
+const fallbackBlockHtml = (raw, { restoreBlankLineMarkers = false } = {}) => {
+  const source = restoreBlankLineMarkers
+    ? restoreFallbackMarkdownBlankLines(raw)
+    : raw;
+  return escapeHtml(source).replace(/\n/g, "<br />");
+};
 
 const fallbackInlineHtml = (raw) => escapeHtml(raw);
 
@@ -388,22 +435,33 @@ export const renderMarkdownBlock = (text) => {
   if (cached !== null) return cached;
   const normalizedRaw = normalizeFenceIndentation(raw);
   const hasFencedCode = containsFencedCode(normalizedRaw);
+  const blankLineSafeRaw = preserveMarkdownBlankLines(normalizedRaw);
   if (containsHtmlLikeTag(normalizedRaw) && !hasFencedCode) {
     return writeToCache(blockCache, raw, fallbackBlockHtml(raw));
   }
   const safeRaw = hasFencedCode
-    ? normalizedRaw
-    : escapeMarkdownHtmlTags(normalizedRaw);
+    ? blankLineSafeRaw
+    : escapeMarkdownHtmlTags(blankLineSafeRaw);
   if (!hasFencedCode && !shouldUseMarkdownParser(safeRaw)) {
-    return writeToCache(blockCache, raw, fallbackBlockHtml(safeRaw));
+    return writeToCache(
+      blockCache,
+      raw,
+      fallbackBlockHtml(safeRaw, { restoreBlankLineMarkers: true }),
+    );
   }
   configureMarkdown();
   const parsed = marked.parse(safeRaw);
   const parsedHtml = typeof parsed === "string" ? parsed : String(parsed || "");
   const limited = limitHtmlNesting(parsedHtml);
-  const cleaned = cleanupMarkdownHtml(sanitize(limited));
+  const cleaned = restoreMarkdownBlankLines(
+    cleanupMarkdownHtml(sanitize(limited)),
+  );
   if (isObjectStringFailure(parsedHtml) || isObjectStringFailure(cleaned)) {
-    return writeToCache(blockCache, raw, fallbackBlockHtml(safeRaw));
+    return writeToCache(
+      blockCache,
+      raw,
+      fallbackBlockHtml(safeRaw, { restoreBlankLineMarkers: true }),
+    );
   }
   return writeToCache(blockCache, raw, cleaned);
 };

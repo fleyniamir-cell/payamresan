@@ -66,6 +66,7 @@ import {
   deleteGroupChat,
   editMessage,
   fetchHealth,
+  getProfileByUsername,
   fetchPresence,
   getChatPreview,
   getGroupInviteLink,
@@ -76,6 +77,7 @@ import {
   listChatsForUser,
   listMessagesByQuery,
   logout,
+  markMessageRead,
   markMessagesRead,
   pingPresence,
   searchUsers,
@@ -185,6 +187,9 @@ const pruneMessagesForMemory = (messages) => {
   if (list.length <= IN_MEMORY_MESSAGES_PER_CHAT) return list;
   return list.slice(-IN_MEMORY_MESSAGES_PER_CHAT);
 };
+
+const getMessageContextKey = (message) =>
+  String(message?._clientId ?? message?._serverId ?? message?.id ?? "");
 
 const normalizeMessagesCachePayloadForMemory = (payload) => {
   if (!payload || !Array.isArray(payload.messages)) return payload;
@@ -313,6 +318,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const [pendingDeleteMessage, setPendingDeleteMessage] = useState(null);
   const [forwardMessageTarget, setForwardMessageTarget] = useState(null);
   const [forwardSavedChat, setForwardSavedChat] = useState(null);
+  const [forwardedChatPreviewById, setForwardedChatPreviewById] = useState({});
+  const [forwardedUserPreviewByKey, setForwardedUserPreviewByKey] = useState({});
+  const [forwardedChatPreviewTick, setForwardedChatPreviewTick] = useState(0);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
   const updateToastTimerRef = useRef(null);
   const copyToastTimerRef = useRef(null);
@@ -339,6 +347,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const activeUploadProgressHideTimerRef = useRef(null);
   const mediaLoadSnapTimerRef = useRef(null);
   const messageRefreshTimerRef = useRef(null);
+  const forwardedChatPreviewInFlightRef = useRef(new Set());
+  const forwardedUserPreviewInFlightRef = useRef(new Set());
   const channelSeenQueueRef = useRef([]);
   const channelSeenActiveRef = useRef(false);
   const channelSeenLoadedRef = useRef(new Set());
@@ -1000,7 +1010,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       return;
     }
     if (target.kind === "user") {
-      openMemberProfileFromList({
+      const fallbackMember = {
         id: Number(target.userId || 0) || null,
         username: target.username || "",
         nickname: target.nickname || "",
@@ -1008,7 +1018,46 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         color: target.color || "#10b981",
         status: "online",
         role: "",
-      });
+      };
+      const targetUsername = String(target.username || "").trim();
+      if (!targetUsername) {
+        openMemberProfileFromList({
+          ...fallbackMember,
+          _readOnly: true,
+        });
+        return;
+      }
+      try {
+        const res = await getProfileByUsername(targetUsername);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          openMemberProfileFromList({
+            id: Number(data?.id || fallbackMember.id || 0) || null,
+            username: data?.username || fallbackMember.username || "",
+            nickname:
+              data?.nickname ||
+              fallbackMember.nickname ||
+              data?.username ||
+              fallbackMember.username ||
+              "",
+            avatar_url: data?.avatarUrl || fallbackMember.avatar_url || "",
+            color: data?.color || fallbackMember.color || "#10b981",
+            status: data?.status || fallbackMember.status || "online",
+            role: "",
+          });
+          return;
+        }
+        if (res.status === 404) {
+          openMemberProfileFromList({
+            ...fallbackMember,
+            _readOnly: true,
+          });
+          return;
+        }
+      } catch {
+        // ignore lookup failures and fall back to snapshot
+      }
+      openMemberProfileFromList(fallbackMember);
       return;
     }
     const numericChatId = Number(target.chatId || 0);
@@ -1039,6 +1088,21 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           _isMember: Boolean(data?.isMember),
         };
       } catch {
+        setMentionProfile({
+          kind: "group",
+          chatId: numericChatId,
+          name: target.label || "Chat",
+          username: "",
+          visibility: "private",
+          color: target.color || "#10b981",
+          avatarUrl: target.avatar_url || "",
+          inviteToken: "",
+          membersCount: 0,
+          isMember: false,
+          _actionState: "none",
+          _readOnly: true,
+        });
+        setProfileModalOpen(true);
         return;
       }
     }
@@ -1578,7 +1642,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         }
       })();
     }
-  }, [user, activeChatId, isMobileViewport, sseConnected, mobileTab]);
+  }, [user, activeChatId, isMobileViewport, mobileTab]);
 
   useEffect(() => {
     if (!activeChatId) {
@@ -1968,6 +2032,191 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       });
     }
   };
+  const applyProfileUpdate = useCallback((payload = {}) => {
+    const userId = Number(payload?.userId || 0) || null;
+    const nextUsername = String(payload?.username || "")
+      .trim()
+      .toLowerCase();
+    const previousUsername = String(payload?.previousUsername || "")
+      .trim()
+      .toLowerCase();
+    if (!userId && !nextUsername && !previousUsername) return;
+
+    const nextNickname =
+      String(payload?.nickname || "").trim() || nextUsername || previousUsername || "";
+    const nextAvatarUrl = String(payload?.avatarUrl || "").trim();
+    const nextColor = String(payload?.color || "#10b981").trim() || "#10b981";
+    const nextStatus = String(payload?.status || "online").trim().toLowerCase() || "online";
+    const usernames = new Set([nextUsername, previousUsername].filter(Boolean));
+    const matchesUser = (candidateId, candidateUsername) => {
+      const normalizedCandidateId = Number(candidateId || 0) || null;
+      const normalizedCandidateUsername = String(candidateUsername || "")
+        .trim()
+        .toLowerCase();
+      return (
+        (userId && normalizedCandidateId === userId) ||
+        (normalizedCandidateUsername && usernames.has(normalizedCandidateUsername))
+      );
+    };
+
+    presenceStateRef.current.delete(previousUsername);
+    if (nextUsername) {
+      const previousPresence = presenceStateRef.current.get(nextUsername) ||
+        presenceStateRef.current.get(previousUsername);
+      presenceStateRef.current.set(nextUsername, {
+        status: nextStatus,
+        lastSeen:
+          previousPresence?.lastSeen ||
+          new Date().toISOString(),
+      });
+    }
+
+    setChats((prev) =>
+      prev.map((chat) => {
+        let changed = false;
+        const members = Array.isArray(chat?.members) ? chat.members : [];
+        const nextMembers = members.map((member) => {
+          if (!matchesUser(member?.id, member?.username)) {
+            return member;
+          }
+          changed = true;
+          return {
+            ...member,
+            username: nextUsername || member?.username || "",
+            nickname: nextNickname || member?.nickname || member?.username || "",
+            avatar_url: nextAvatarUrl,
+            color: nextColor,
+            status: nextStatus,
+          };
+        });
+        const shouldPatchLastSender =
+          matchesUser(chat?.last_sender_id, chat?.last_sender_username);
+        if (!changed && !shouldPatchLastSender) {
+          return chat;
+        }
+        return {
+          ...chat,
+          members: nextMembers,
+          last_sender_username: shouldPatchLastSender
+            ? nextUsername || chat?.last_sender_username || ""
+            : chat?.last_sender_username,
+          last_sender_nickname: shouldPatchLastSender
+            ? nextNickname || chat?.last_sender_nickname || chat?.last_sender_username || ""
+            : chat?.last_sender_nickname,
+          last_sender_avatar_url: shouldPatchLastSender
+            ? nextAvatarUrl
+            : chat?.last_sender_avatar_url,
+        };
+      }),
+    );
+
+    setMessages((prev) =>
+      prev.map((msg) => {
+        const senderMatch = matchesUser(msg?.user_id, msg?.username);
+        const replyMatch = matchesUser(msg?.replyTo?.user_id, msg?.replyTo?.username);
+        const forwardedMatch = matchesUser(
+          msg?.forwarded_from_user_id,
+          msg?.forwarded_from_username,
+        );
+        if (!senderMatch && !replyMatch && !forwardedMatch) {
+          return msg;
+        }
+        return {
+          ...msg,
+          ...(senderMatch
+            ? {
+                username: nextUsername || msg?.username || "",
+                nickname: nextNickname || msg?.nickname || msg?.username || "",
+                avatar_url: nextAvatarUrl,
+                color: nextColor,
+              }
+            : {}),
+          ...(replyMatch
+            ? {
+                replyTo: {
+                  ...msg.replyTo,
+                  username: nextUsername || msg?.replyTo?.username || "",
+                  nickname:
+                    nextNickname ||
+                    msg?.replyTo?.nickname ||
+                    msg?.replyTo?.username ||
+                    "",
+                  avatar_url: nextAvatarUrl,
+                  color: nextColor,
+                },
+              }
+            : {}),
+          ...(forwardedMatch
+            ? {
+                forwarded_from_username:
+                  nextUsername || msg?.forwarded_from_username || "",
+                forwarded_from_label:
+                  nextNickname || msg?.forwarded_from_label || nextUsername || "",
+                forwarded_from_avatar_url: nextAvatarUrl,
+                forwarded_from_color: nextColor,
+              }
+            : {}),
+        };
+      }),
+    );
+
+    setProfileModalMember((prev) => {
+      if (!prev || !matchesUser(prev?.id, prev?.username)) return prev;
+      return {
+        ...prev,
+        username: nextUsername || prev?.username || "",
+        nickname: nextNickname || prev?.nickname || prev?.username || "",
+        avatar_url: nextAvatarUrl,
+        color: nextColor,
+        status: nextStatus,
+      };
+    });
+
+    setMentionProfile((prev) => {
+      if (!prev || prev.kind !== "user" || !matchesUser(prev?.id, prev?.username)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        username: nextUsername || prev?.username || "",
+        nickname: nextNickname || prev?.nickname || prev?.username || "",
+        avatarUrl: nextAvatarUrl,
+        color: nextColor,
+      };
+    });
+
+    setActivePeer((prev) => {
+      if (!prev || !matchesUser(prev?.id, prev?.username)) return prev;
+      return {
+        ...prev,
+        username: nextUsername || prev?.username || "",
+        nickname: nextNickname || prev?.nickname || prev?.username || "",
+        avatar_url: nextAvatarUrl,
+        color: nextColor,
+        status: nextStatus,
+      };
+    });
+
+    setUser((prev) => {
+      if (!prev || !matchesUser(prev?.id, prev?.username)) return prev;
+      return {
+        ...prev,
+        username: nextUsername || prev?.username || "",
+        nickname: nextNickname || prev?.nickname || prev?.username || "",
+        avatarUrl: nextAvatarUrl,
+        color: nextColor,
+        status: nextStatus,
+      };
+    });
+
+    if (matchesUser(null, activeHeaderPeer?.username)) {
+      const existingPresence = presenceStateRef.current.get(nextUsername || previousUsername);
+      setPeerPresence((prev) => ({
+        status: nextStatus || prev?.status || "online",
+        lastSeen: existingPresence?.lastSeen || prev?.lastSeen || null,
+      }));
+    }
+  }, [activeHeaderPeer?.username, setUser]);
   const lastSeenAt = peerPresence.lastSeen
     ? parsePresenceDate(peerPresence.lastSeen)?.getTime() || null
     : null;
@@ -2082,6 +2331,224 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       ? typingIndicator.label
       : activeHeaderSubtitle;
   const activeChatMuted = Boolean(activeChat?._muted);
+  const forwardedChatIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          messages
+            .map((msg) => Number(msg?.forwarded_from_chat_id || 0))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+      ),
+    [messages],
+  );
+  const forwardedUserRefs = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          messages
+            .map((msg) => {
+              const userId = Number(msg?.forwarded_from_user_id || 0) || null;
+              const username = String(msg?.forwarded_from_username || "")
+                .trim()
+                .toLowerCase();
+              if (!userId && !username) return null;
+              return [
+                userId ? `id:${userId}` : `username:${username}`,
+                { userId, username },
+              ];
+            })
+            .filter(Boolean),
+        ).values(),
+      ),
+    [messages],
+  );
+  const forwardedChatsById = useMemo(() => {
+    const next = {};
+    chats.forEach((chat) => {
+      const chatId = Number(chat?.id || 0);
+      const chatType = String(chat?.type || "").toLowerCase();
+      if (!chatId || (chatType !== "group" && chatType !== "channel")) return;
+      next[chatId] = chat;
+    });
+    Object.entries(forwardedChatPreviewById).forEach(([rawId, entry]) => {
+      const chatId = Number(rawId || 0);
+      if (!chatId || next[chatId] || !entry || entry.status !== "ready" || !entry.chat) {
+        return;
+      }
+      next[chatId] = entry.chat;
+    });
+    return next;
+  }, [chats, forwardedChatPreviewById]);
+  const forwardedChatStatusById = useMemo(() => {
+    const next = {};
+    chats.forEach((chat) => {
+      const chatId = Number(chat?.id || 0);
+      const chatType = String(chat?.type || "").toLowerCase();
+      if (!chatId || (chatType !== "group" && chatType !== "channel")) return;
+      next[chatId] = "ready";
+    });
+    Object.entries(forwardedChatPreviewById).forEach(([rawId, entry]) => {
+      const chatId = Number(rawId || 0);
+      if (!chatId || !entry?.status) return;
+      next[chatId] = entry.status;
+    });
+    return next;
+  }, [chats, forwardedChatPreviewById]);
+  const forwardedUsersById = useMemo(() => {
+    const next = {};
+    if (Number(user?.id || 0) > 0) {
+      next[Number(user.id)] = {
+        id: Number(user.id),
+        username: user.username || "",
+        nickname: user.nickname || user.username || "",
+        avatar_url: user.avatarUrl || "",
+        color: user.color || "#10b981",
+        status: user.status || "online",
+      };
+    }
+    chats.forEach((chat) => {
+      (Array.isArray(chat?.members) ? chat.members : []).forEach((member) => {
+        const memberId = Number(member?.id || 0);
+        if (!memberId) return;
+        next[memberId] = {
+          id: memberId,
+          username: member?.username || "",
+          nickname: member?.nickname || member?.username || "",
+          avatar_url: member?.avatar_url || "",
+          color: member?.color || "#10b981",
+          status: member?.status || "online",
+        };
+      });
+    });
+    Object.values(forwardedUserPreviewByKey).forEach((entry) => {
+      const memberId = Number(entry?.profile?.id || 0);
+      if (!memberId || !entry?.profile || entry.status !== "ready") return;
+      next[memberId] = entry.profile;
+    });
+    return next;
+  }, [chats, forwardedUserPreviewByKey, user]);
+  const forwardedUserStatusByKey = useMemo(() => {
+    const next = {};
+    Object.entries(forwardedUserPreviewByKey).forEach(([username, entry]) => {
+      if (!username || !entry?.status) return;
+      next[username] = entry.status;
+    });
+    return next;
+  }, [forwardedUserPreviewByKey]);
+  useEffect(() => {
+    if (!forwardedChatIds.length) return undefined;
+    const timerId = window.setInterval(() => {
+      setForwardedChatPreviewTick(Date.now());
+    }, 2 * 60 * 1000);
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [forwardedChatIds.length]);
+  useEffect(() => {
+    forwardedUserRefs.forEach(({ userId, username }) => {
+      const cacheKey = userId ? `id:${userId}` : `username:${username}`;
+      const cached = forwardedUserPreviewByKey[cacheKey];
+      if (cached?.status === "ready" || cached?.status === "missing") return;
+      if (!username) return;
+      if (forwardedUserPreviewInFlightRef.current.has(cacheKey)) return;
+      forwardedUserPreviewInFlightRef.current.add(cacheKey);
+      void (async () => {
+        try {
+          const res = await getProfileByUsername(username);
+          const data = await res.json().catch(() => ({}));
+          const resolvedUserId = Number(data?.id || 0) || null;
+          if (res.ok && (!userId || resolvedUserId === userId)) {
+            setForwardedUserPreviewByKey((prev) => ({
+              ...prev,
+              [cacheKey]: {
+                status: "ready",
+                profile: {
+                  id: resolvedUserId,
+                  username: data?.username || username,
+                  nickname: data?.nickname || data?.username || username,
+                  avatar_url: data?.avatarUrl || "",
+                  color: data?.color || "#10b981",
+                  status: data?.status || "online",
+                },
+              },
+            }));
+            return;
+          }
+          if (res.status === 404 || (res.ok && userId && resolvedUserId !== userId)) {
+            setForwardedUserPreviewByKey((prev) => ({
+              ...prev,
+              [cacheKey]: { status: "missing" },
+            }));
+          }
+        } catch {
+          // ignore live forwarded user lookup errors
+        } finally {
+          forwardedUserPreviewInFlightRef.current.delete(cacheKey);
+        }
+      })();
+    });
+  }, [forwardedUserPreviewByKey, forwardedUserRefs]);
+  useEffect(() => {
+    const liveIds = new Set(Object.keys(forwardedChatsById).map((id) => Number(id)));
+    const now = Date.now();
+    forwardedChatIds.forEach((chatId) => {
+      if (liveIds.has(chatId)) return;
+      const cached = forwardedChatPreviewById[chatId];
+      const isFreshReady =
+        cached?.status === "ready" &&
+        now - Number(cached?.fetchedAt || 0) < 2 * 60 * 1000;
+      if (cached?.status === "missing" || isFreshReady) return;
+      if (forwardedChatPreviewInFlightRef.current.has(chatId)) return;
+      forwardedChatPreviewInFlightRef.current.add(chatId);
+      void (async () => {
+        try {
+          const res = await getChatPreview({
+            chatId,
+            username: user.username,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            const nextChat = {
+              id: Number(data?.id || chatId),
+              type: data?.type || "group",
+              name: data?.name || "Chat",
+              group_username: data?.username || "",
+              group_visibility: data?.visibility || "public",
+              group_color: data?.color || "#10b981",
+              group_avatar_url: data?.avatarUrl || "",
+              invite_token: data?.inviteToken || "",
+              membersCount: Number(data?.membersCount || 0),
+              members: [],
+              _previewOnly: true,
+              _isMember: Boolean(data?.isMember),
+            };
+            setForwardedChatPreviewById((prev) => ({
+              ...prev,
+              [chatId]: { status: "ready", chat: nextChat, fetchedAt: Date.now() },
+            }));
+            return;
+          }
+          if (res.status === 404) {
+            setForwardedChatPreviewById((prev) => ({
+              ...prev,
+              [chatId]: { status: "missing" },
+            }));
+          }
+        } catch {
+          // ignore live forwarded chat preview errors
+        } finally {
+          forwardedChatPreviewInFlightRef.current.delete(chatId);
+        }
+      })();
+    });
+  }, [
+    forwardedChatIds,
+    forwardedChatPreviewById,
+    forwardedChatPreviewTick,
+    forwardedChatsById,
+    user.username,
+  ]);
   const mentionProfileUser =
     mentionProfile?.kind === "user"
       ? {
@@ -2232,20 +2699,22 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const canDeleteMessageForEveryone = useCallback(
     (message) => {
       if (String(activeChat?.type || "").toLowerCase() === "saved") return false;
+      if (isActiveChannelChat && !canCurrentUserEditGroup) return false;
       const messageAuthor = String(message?.username || "").toLowerCase();
       const currentUsername = String(user?.username || "").toLowerCase();
       if (!messageAuthor) return false;
       if (messageAuthor === currentUsername) return true;
       return canCurrentUserEditGroup;
     },
-    [activeChat?.type, canCurrentUserEditGroup, user?.username],
+    [activeChat?.type, canCurrentUserEditGroup, isActiveChannelChat, user?.username],
   );
 
   const canEditMessageFromContext = useCallback(
     (message) =>
+      (!isActiveChannelChat || canCurrentUserEditGroup) &&
       String(message?.username || "").toLowerCase() ===
-      String(user?.username || "").toLowerCase(),
-    [user?.username],
+        String(user?.username || "").toLowerCase(),
+    [canCurrentUserEditGroup, isActiveChannelChat, user?.username],
   );
 
   function handleDeleteMessageRequest(message, _options = {}) {
@@ -2746,7 +3215,16 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     const numericMessageId = Number(messageId || 0);
     if (!numericMessageId) return;
     setMessages((prev) =>
-      prev.filter((msg) => Number(msg?._serverId || msg?.id || 0) !== numericMessageId),
+      prev
+        .filter((msg) => Number(msg?._serverId || msg?.id || 0) !== numericMessageId)
+        .map((msg) => {
+          const replyId = Number(msg?.replyTo?.id || 0);
+          if (!replyId || replyId !== numericMessageId) return msg;
+          return {
+            ...msg,
+            replyTo: null,
+          };
+        }),
     );
     if (activeChatId) {
       pruneDeletedMessagesFromCache(activeChatId, [numericMessageId]);
@@ -2793,6 +3271,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setMessages,
     setChats,
     sseReconnectRef,
+    isAppActive,
+    canMarkReadInCurrentView,
+    markMessageRead,
+    markMessagesRead,
+    isMarkingReadRef,
     onIncomingMessage: (payload, meta = {}) => {
       const payloadChatId = Number(payload?.chatId || 0);
       const sender = String(payload?.username || "").trim().toLowerCase();
@@ -2892,6 +3375,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     },
     onPresenceUpdate: (payload) => {
       applyPresenceUpdate(payload);
+    },
+    onProfileUpdated: (payload) => {
+      applyProfileUpdate(payload);
     },
     onTypingUpdate: (payload) => {
       const payloadChatId = Number(payload?.chatId || 0);
@@ -3286,33 +3772,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
       if (isTargetActive) {
         setMessages((prev) => {
-          const normalizePendingBody = (value) =>
-            normalizeMessageBody(value).trim();
-          const isGenericFileSummaryBody = (value) => {
-            const normalized = normalizePendingBody(value);
-            if (!normalized) return false;
-            return /^sent (a (media file|document|photo|video|voice message)|\d+ (files|photos|videos|voice messages|documents))$/i.test(
-              normalized,
-            );
-          };
-          const bodiesLookEquivalent = (
-            localBody,
-            serverLikeBody,
-            localFiles = [],
-            serverLikeFiles = [],
-          ) => {
-            const normalizedLocal = normalizePendingBody(localBody);
-            const normalizedServer = normalizePendingBody(serverLikeBody);
-            if (normalizedLocal === normalizedServer) return true;
-            const localHasFiles = Array.isArray(localFiles) && localFiles.length > 0;
-            const serverHasFiles =
-              Array.isArray(serverLikeFiles) && serverLikeFiles.length > 0;
-            if (!localHasFiles || !serverHasFiles) return false;
-            if (!normalizedLocal && isGenericFileSummaryBody(normalizedServer)) {
-              return true;
-            }
-            return false;
-          };
           const uploadType = String(pendingMessage?._uploadType || "").toLowerCase();
           const files = Array.isArray(pendingMessage?._files) ? pendingMessage._files : [];
           const hasMediaVideo = files.some((file) =>
@@ -3321,43 +3780,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           const keepPendingUntilServerEcho = hasFiles && uploadType === "media" && hasMediaVideo;
           const serverId = Number(data.id) || null;
           const awaitingServerEcho = Boolean(serverId);
-          let index = prev.findIndex((msg) => msg?._clientId === clientId);
-          if (index < 0) {
-            const pendingBody = String(pendingMessage?.body || "").trim();
-            const pendingCreatedAt = parseServerDate(
-              pendingMessage?._createdAt || new Date().toISOString(),
-            ).getTime();
-            index = prev.findIndex((msg) => {
-              if (!msg) return false;
-              if (Number(msg?._chatId || 0) !== Number(targetChatId)) return false;
-              if (String(msg?.username || "") !== String(user.username || "")) {
-                return false;
-              }
-              const localFiles = Array.isArray(msg?._files)
-                ? msg._files
-                : Array.isArray(msg?.files)
-                  ? msg.files
-                  : [];
-              if (localFiles.length !== files.length) return false;
-              if (
-                !bodiesLookEquivalent(
-                  msg?.body || "",
-                  pendingBody,
-                  localFiles,
-                  files,
-                )
-              ) {
-                return false;
-              }
-              const localReplyId = Number(msg?.replyTo?.id || 0);
-              const pendingReplyId = Number(pendingMessage?.replyTo?.id || 0);
-              if (localReplyId !== pendingReplyId) return false;
-              const localCreatedAt = parseServerDate(
-                msg?.created_at || new Date().toISOString(),
-              ).getTime();
-              return Math.abs(localCreatedAt - pendingCreatedAt) < 2 * 60 * 1000;
-            });
-          }
+          const index = prev.findIndex((msg) => msg?._clientId === clientId);
           if (index >= 0) {
             return prev.map((msg, msgIndex) =>
               msgIndex === index
@@ -3739,6 +4162,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       const normalizeFetchedChats = (prevChats = []) =>
         merged
           .map((chat) => {
+            const isActiveChat =
+              Number(activeChatIdRef.current || 0) === Number(chat?.id || 0);
             const muted = Boolean(Number(chat?.muted || 0));
             const files = Array.isArray(chat?.last_message_files)
               ? chat.last_message_files
@@ -3761,12 +4186,14 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
                 ...chat,
                 _lastMessagePending: true,
                 last_message_read_at: null,
+                unread_count: isActiveChat ? 0 : Number(chat?.unread_count || 0),
                 _muted: muted,
               };
             }
             if (!hasProcessingVideo || !isFromOther) {
               return {
                 ...chat,
+                unread_count: isActiveChat ? 0 : Number(chat?.unread_count || 0),
                 _muted: muted,
               };
             }
@@ -3792,7 +4219,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
               last_message_read_at:
                 previous.last_message_read_at ?? chat.last_message_read_at ?? null,
               last_message_files: previous.last_message_files || [],
-              unread_count: previous.unread_count || 0,
+              unread_count: isActiveChat ? 0 : previous.unread_count || 0,
               _muted: muted,
             };
           })
@@ -5314,6 +5741,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     chats,
     currentUsername: user?.username,
     canCurrentUserEditGroup,
+    canReplyToMessage: canSendInActiveChat,
     canEditMessage: canEditMessageFromContext,
     canDeleteMessageForEveryone,
     onReplyToMessage: handleStartReply,
@@ -5328,6 +5756,24 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     onToggleChatMute: toggleMuteChat,
     onDeleteChats: requestDeleteChats,
   });
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    if (
+      contextMenu.kind === "message" &&
+      Number(contextMenu.targetChatId || 0) !== Number(activeChatId || 0)
+    ) {
+      closeContextMenu();
+      return;
+    }
+    if (contextMenu.kind !== "message" || !contextMenu.targetMessageKey) return;
+    const targetStillExists = messages.some(
+      (message) => getMessageContextKey(message) === contextMenu.targetMessageKey,
+    );
+    if (!targetStillExists) {
+      closeContextMenu();
+    }
+  }, [activeChatId, closeContextMenu, contextMenu, messages]);
 
   async function handleDeleteAccount(password) {
     if (!user?.username) return;
@@ -5433,6 +5879,22 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const handleUserScrollIntent = () => {
     cancelSmoothScroll?.();
     allowStartReachedRef.current = true;
+    const scroller = chatScrollRef.current;
+    if (!scroller) return;
+    const distanceFromBottom =
+      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (distanceFromBottom <= 24) return;
+    pendingScrollToBottomRef.current = false;
+    pendingScrollToUnreadRef.current = null;
+    unreadAnchorLockUntilRef.current = 0;
+    if (!userScrolledUpRef.current) {
+      userScrolledUpRef.current = true;
+      setUserScrolledUp(true);
+    }
+    if (isAtBottomRef.current) {
+      isAtBottomRef.current = false;
+      setIsAtBottom(false);
+    }
   };
   const handleFloatingDayNavigate = useCallback(() => {
     cancelSmoothScroll?.();
@@ -5662,6 +6124,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         onOpenMessageSenderProfile={openMemberProfileFromMessage}
         onOpenMention={openMentionProfile}
         onOpenForwardOrigin={handleOpenForwardOrigin}
+        forwardedChatsById={forwardedChatsById}
+        forwardedChatStatusById={forwardedChatStatusById}
+        forwardedUsersById={forwardedUsersById}
+        forwardedUserStatusByKey={forwardedUserStatusByKey}
         onForwardMessage={handleOpenForwardModal}
         onOpenContextMenu={openContextMenu}
         onUserScrollIntent={handleUserScrollIntent}
@@ -5868,7 +6334,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             inviteLink={profileInviteLink}
             canViewInvite={canCurrentUserViewInvite}
             readOnly={Boolean(
-              isMentionProfileReadOnly,
+              isMentionProfileReadOnly ||
+                mentionProfile?._readOnly ||
+                profileModalMember?._readOnly,
             )}
             showJoinAction={canJoinMentionChat}
             onJoinChat={handleJoinMentionChat}

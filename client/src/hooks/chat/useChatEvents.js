@@ -37,10 +37,16 @@ export function useChatEvents({
   setMessages,
   setChats,
   sseReconnectRef,
+  isAppActive,
+  canMarkReadInCurrentView,
+  markMessagesRead,
+  markMessageRead,
+  isMarkingReadRef,
   onIncomingMessage,
   onMessageDeleted,
   onChatRead,
   onPresenceUpdate,
+  onProfileUpdated,
   onTypingUpdate,
   onChatListChanged,
   onSessionRevoked,
@@ -49,6 +55,7 @@ export function useChatEvents({
   const onMessageDeletedRef = useRef(onMessageDeleted);
   const onChatReadRef = useRef(onChatRead);
   const onPresenceUpdateRef = useRef(onPresenceUpdate);
+  const onProfileUpdatedRef = useRef(onProfileUpdated);
   const onTypingUpdateRef = useRef(onTypingUpdate);
   const onChatListChangedRef = useRef(onChatListChanged);
   const onSessionRevokedRef = useRef(onSessionRevoked);
@@ -70,6 +77,10 @@ export function useChatEvents({
   useEffect(() => {
     onPresenceUpdateRef.current = onPresenceUpdate;
   }, [onPresenceUpdate]);
+
+  useEffect(() => {
+    onProfileUpdatedRef.current = onProfileUpdated;
+  }, [onProfileUpdated]);
 
   useEffect(() => {
     onTypingUpdateRef.current = onTypingUpdate;
@@ -121,6 +132,7 @@ export function useChatEvents({
           payload.type !== "chat_message_updated" &&
           payload.type !== "chat_list_changed" &&
           payload.type !== "presence_update" &&
+          payload.type !== "profile_updated" &&
           payload.type !== "chat_typing" &&
           payload.type !== "session_revoked"
         ) {
@@ -132,6 +144,10 @@ export function useChatEvents({
         }
         if (payload.type === "presence_update") {
           onPresenceUpdateRef.current?.(payload);
+          return;
+        }
+        if (payload.type === "profile_updated") {
+          onProfileUpdatedRef.current?.(payload);
           return;
         }
         if (payload.type === "chat_typing") {
@@ -180,7 +196,11 @@ export function useChatEvents({
                     ? null
                     : chat?.last_message_read_at || null,
                   unread_count:
-                    !isOwnEvent && !isActiveChat ? currentUnread + 1 : currentUnread,
+                    isActiveChat
+                      ? 0
+                      : !isOwnEvent
+                        ? currentUnread + 1
+                        : currentUnread,
                 };
               },
             );
@@ -225,6 +245,36 @@ export function useChatEvents({
               setUnreadInChat((prev) => prev + 1);
             } else {
               pendingScrollToBottomRef.current = true;
+              setChats((prev) =>
+                prev.map((chat) =>
+                  Number(chat?.id) === Number(payloadChatId)
+                    ? { ...chat, unread_count: 0 }
+                    : chat,
+                ),
+              );
+              if (
+                isAppActive &&
+                canMarkReadInCurrentView &&
+                !isMarkingReadRef?.current
+              ) {
+                isMarkingReadRef.current = true;
+                const markReadRequest =
+                  Number(payload?.messageId || 0) > 0
+                    ? markMessageRead({
+                        chatId: payloadChatId,
+                        username: usernameRef.current,
+                        messageId: Number(payload.messageId),
+                      })
+                    : markMessagesRead({
+                        chatId: payloadChatId,
+                        username: usernameRef.current,
+                      });
+                markReadRequest
+                  .catch(() => null)
+                  .finally(() => {
+                    isMarkingReadRef.current = false;
+                  });
+              }
             }
           }
           if (payload.type === "chat_read" && !isOwnEvent) {
@@ -247,11 +297,21 @@ export function useChatEvents({
                   .filter((id) => Number.isFinite(id))
               : [];
             if (messageIds.length) {
+              const deletedIdSet = new Set(messageIds);
               setMessages((prev) =>
-                prev.filter((msg) => {
-                  const serverId = Number(msg?._serverId || msg?.id || 0);
-                  return !messageIds.includes(serverId);
-                }),
+                prev
+                  .filter((msg) => {
+                    const serverId = Number(msg?._serverId || msg?.id || 0);
+                    return !deletedIdSet.has(serverId);
+                  })
+                  .map((msg) => {
+                    const replyId = Number(msg?.replyTo?.id || 0);
+                    if (!replyId || !deletedIdSet.has(replyId)) return msg;
+                    return {
+                      ...msg,
+                      replyTo: null,
+                    };
+                  }),
               );
             }
             scheduleMessageRefreshRef.current?.(currentActiveId, {
@@ -307,6 +367,11 @@ export function useChatEvents({
     setMessages,
     setSseConnected,
     setUnreadInChat,
+    canMarkReadInCurrentView,
+    isAppActive,
+    isMarkingReadRef,
+    markMessageRead,
+    markMessagesRead,
     sseReconnectDelayMs,
     sseReconnectRef,
     userScrolledUpRef,

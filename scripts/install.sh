@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
+# songbird-deploy-version: 0.9.2
 
 set -uo pipefail
+
+COLOR_RESET=""
+COLOR_LOG=""
+COLOR_WARN=""
+COLOR_ERROR=""
+COLOR_SUCCESS=""
+
+if [[ -z "${NO_COLOR:-}" && ( "${FORCE_COLOR:-0}" != "0" || ( "${TERM:-}" != "dumb" && ( -t 1 || -t 2 ) ) ) ]]; then
+  COLOR_RESET=$'\033[0m'
+  COLOR_LOG=$'\033[1;38;2;42;186;130m'
+  COLOR_WARN=$'\033[1;33m'
+  COLOR_ERROR=$'\033[1;31m'
+  COLOR_SUCCESS=$'\033[1;32m'
+fi
 
 handle_exit() {
   local exit_code=$?
   if [[ "$exit_code" -eq 0 ]]; then
-    clear
+    if [[ "${SKIP_CLEAR_ON_EXIT:-0}" != "1" ]]; then
+      clear
+    fi
     return 0
   fi
 
-  printf "\n[SONGBIRD] Script exited with code %s.\n" "$exit_code" >&2
+  printf "\n%b[SONGBIRD] Script exited with code %s.%b\n" "$COLOR_ERROR" "$exit_code" "$COLOR_RESET" >&2
   if [[ -f "$LOG_FILE" ]]; then
-    printf "[SONGBIRD] Review the log at %s for the last recorded step.\n" "$LOG_FILE" >&2
+    printf "%b[SONGBIRD] Review the log at %s for the last recorded step.%b\n" "$COLOR_ERROR" "$LOG_FILE" "$COLOR_RESET" >&2
   fi
 }
 
@@ -37,11 +54,12 @@ NGINX_ENABLED_FILE="/etc/nginx/sites-enabled/songbird"
 DEFAULT_SERVER_PORT="5174"
 DEFAULT_CLIENT_PORT="80"
 DEFAULT_FILE_UPLOAD="true"
-DEFAULT_MAX_UPLOAD="78643200"
+DEFAULT_FILE_UPLOAD_MAX_SIZE_MB="25"
+DEFAULT_MAX_UPLOAD_MB="75"
 DEFAULT_RETENTION_DAYS="7"
 DEFAULT_TEXT_RETENTION_DAYS="0"
-DEFAULT_ACCOUNT_CREATION="true"
-DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES="5242880"
+DEFAULT_SIGN_UP="true"
+DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_MB="5"
 DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS="480"
 NODE_MAJOR="24"
 SCRIPT_REMOTE_URL="${SCRIPT_REMOTE_URL:-https://raw.githubusercontent.com/bllackbull/Songbird/main/scripts/install.sh}"
@@ -50,6 +68,11 @@ CERT_INSTALL_DIR="/etc/ssl/songbird"
 ACME_WEBROOT="/var/lib/songbird/certbot"
 LEGO_STATE_DIR="/var/lib/songbird/lego"
 LEGO_BIN="/usr/local/bin/lego"
+GLOBAL_COMMAND_PATH="/usr/local/bin/songbird-deploy"
+SONGBIRD_SOCIAL_GITHUB="https://github.com/bllackbull/Songbird"
+SONGBIRD_SOCIAL_TELEGRAM="https://t.me/songbirdapp"
+SONGBIRD_SOCIAL_WEBSITE="https://chat.songbird.website/invite/c592b42783ba50a9833f6f4e15c5126a01b4f512242b5921"
+SONGBIRD_NOWPAYMENTS="https://nowpayments.io/donation/blackbull"
 
 # Mirror URLs
 MIRROR_NODESOURCE="${MIRROR_NODESOURCE:-}"
@@ -61,14 +84,17 @@ OS_ID=""
 OS_ID_LIKE=""
 DEPLOY_MODE="ip"
 DOMAIN_NAMES=()
+DOMAIN_GROUPS=()
+MANUAL_CERT_GROUP_FULLCHAIN_PATHS=()
+MANUAL_CERT_GROUP_PRIVKEY_PATHS=()
 CERTBOT_EMAIL=""
 SERVER_PORT="$DEFAULT_SERVER_PORT"
 CLIENT_PORT="$DEFAULT_CLIENT_PORT"
 FILE_UPLOAD="$DEFAULT_FILE_UPLOAD"
-MAX_UPLOAD="$DEFAULT_MAX_UPLOAD"
+MAX_UPLOAD_MB="$DEFAULT_MAX_UPLOAD_MB"
 RETENTION_DAYS="$DEFAULT_RETENTION_DAYS"
 TEXT_RETENTION_DAYS="$DEFAULT_TEXT_RETENTION_DAYS"
-ACCOUNT_CREATION="$DEFAULT_ACCOUNT_CREATION"
+ACCOUNT_CREATION="$DEFAULT_SIGN_UP"
 NGINX_SERVER_NAME="_"
 CURRENT_ENV_FILE=""
 PROMPT_FD=0
@@ -87,12 +113,94 @@ CERTBOT_IP_ADDRESS=""
 MANUAL_CERT_FULLCHAIN_PATH=""
 MANUAL_CERT_PRIVKEY_PATH=""
 NODE_EXEC_PATH=""
+NPM_EXEC_PATH=""
+SKIP_CLEAR_ON_EXIT="0"
+MENU_ACTION_PAUSED="0"
+
+resolve_current_script_path() {
+  local source_hint="${BASH_SOURCE[0]:-$0}"
+  if [[ -z "$source_hint" ]]; then
+    return 1
+  fi
+  if [[ "$source_hint" != /* ]]; then
+    source_hint="$(pwd)/$source_hint"
+  fi
+  if [[ -f "$source_hint" ]]; then
+    printf "%s" "$source_hint"
+    return 0
+  fi
+  return 1
+}
+
+read_first_line() {
+  local file_path="$1"
+  if [[ ! -f "$file_path" ]]; then
+    return 1
+  fi
+  head -n 1 "$file_path" | tr -d '\r\n'
+}
+
+read_version_file_value() {
+  local version_file="$1"
+  local version=""
+  version="$(read_first_line "$version_file" 2>/dev/null || true)"
+  version="$(printf "%s" "$version" | xargs)"
+  if [[ -z "$version" ]]; then
+    return 1
+  fi
+  printf "%s" "$version"
+}
+
+read_script_version_header() {
+  local file_path="$1"
+  if [[ ! -f "$file_path" ]]; then
+    return 1
+  fi
+  local header=""
+  header="$(grep -E '^# songbird-deploy-version:' "$file_path" | head -n 1 | cut -d ':' -f 2- | xargs || true)"
+  if [[ -z "$header" || "$header" == "auto" ]]; then
+    return 1
+  fi
+  printf "%s" "$header"
+}
+
+resolve_script_version_for_path() {
+  local script_path="$1"
+  local header_version=""
+  header_version="$(read_script_version_header "$script_path" 2>/dev/null || true)"
+  if [[ -n "$header_version" ]]; then
+    printf "%s" "$header_version"
+    return 0
+  fi
+
+  local script_dir=""
+  script_dir="$(cd -- "$(dirname -- "$script_path")" && pwd -P 2>/dev/null || true)"
+  local repo_root=""
+  if [[ -n "$script_dir" ]]; then
+    repo_root="$(cd -- "$script_dir/.." && pwd -P 2>/dev/null || true)"
+  fi
+  if [[ -n "$repo_root" && -f "$repo_root/VERSION" ]]; then
+    read_version_file_value "$repo_root/VERSION"
+    return $?
+  fi
+
+  if [[ -f "$INSTALL_DIR/VERSION" ]]; then
+    read_version_file_value "$INSTALL_DIR/VERSION"
+    return $?
+  fi
+
+  return 1
+}
+
+CURRENT_SCRIPT_PATH="$(resolve_current_script_path 2>/dev/null || true)"
+SCRIPT_VERSION="$(resolve_script_version_for_path "$CURRENT_SCRIPT_PATH" 2>/dev/null || printf "0.0.0")"
+LAST_GLOBAL_COMMAND_VERSION=""
 
 log() {
   local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
   local log_dir="$(dirname "$LOG_FILE")"
 
-  printf "[SONGBIRD] %s\n" "$1"
+  printf "%b[SONGBIRD] %s%b\n" "$COLOR_LOG" "$1" "$COLOR_RESET"
 
   if [[ -d "$log_dir" ]]; then
     printf "[%s] [SONGBIRD] %s\n" "$timestamp" "$1" >> "$LOG_FILE" 2>/dev/null || true
@@ -103,14 +211,14 @@ log() {
 ensure_log_dir() {
   local log_dir="$(dirname "$LOG_FILE")"
   if [[ ! -d "$log_dir" ]]; then
-    run_as_root mkdir -p "$log_dir"
+    run_as_root mkdir -p "$log_dir" || return 1
     log "Created log directory: $log_dir"
   fi
 }
 
 warn() {
   local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-  printf "[%s] WARNING: %s\n" "SONGBIRD" "$*" >&2
+  printf "%b[%s] WARNING: %s%b\n" "$COLOR_WARN" "SONGBIRD" "$*" "$COLOR_RESET" >&2
   if [[ -f "$LOG_FILE" ]]; then
     printf "[%s] [SONGBIRD] WARNING: %s\n" "$timestamp" "$*" >> "$LOG_FILE" 2>/dev/null || true
   fi
@@ -118,11 +226,200 @@ warn() {
 
 fail() {
   local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-  printf "[%s] ERROR: %s\n" "SONGBIRD" "$*" >&2
+  printf "%b[%s] ERROR: %s%b\n" "$COLOR_ERROR" "SONGBIRD" "$*" "$COLOR_RESET" >&2
   if [[ -f "$LOG_FILE" ]]; then
     printf "[%s] [SONGBIRD] ERROR: %s\n" "$timestamp" "$*" >> "$LOG_FILE" 2>/dev/null || true
   fi
   exit 1
+}
+
+terminal_columns() {
+  local cols=""
+  if cols="$(tput cols 2>/dev/null)" && [[ "$cols" =~ ^[0-9]+$ ]] && (( cols > 0 )); then
+    printf "%s" "$cols"
+    return 0
+  fi
+  if [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && (( COLUMNS > 0 )); then
+    printf "%s" "$COLUMNS"
+    return 0
+  fi
+  printf "80"
+}
+
+wrap_success_line() {
+  local text="$1"
+  local width="$2"
+  if (( width < 1 )); then
+    printf "%s\n" "$text"
+    return 0
+  fi
+  if [[ -z "$text" ]]; then
+    printf "\n"
+    return 0
+  fi
+
+  local remaining="$text"
+  while (( ${#remaining} > width )); do
+    local chunk="${remaining:0:width}"
+    local break_pos=-1
+    local idx=0
+    for (( idx=${#chunk}-1; idx>=0; idx-- )); do
+      if [[ "${chunk:idx:1}" == " " ]]; then
+        break_pos="$idx"
+        break
+      fi
+    done
+
+    if (( break_pos > 0 )); then
+      printf "%s\n" "${remaining:0:break_pos}"
+      remaining="${remaining:break_pos+1}"
+      while [[ "$remaining" == " "* ]]; do
+        remaining="${remaining:1}"
+      done
+    else
+      printf "%s\n" "$chunk"
+      remaining="${remaining:width}"
+    fi
+  done
+
+  printf "%s\n" "$remaining"
+}
+
+print_plain_success_block() {
+  local title="$1"
+  shift || true
+  local lines=("$@")
+  local line=""
+
+  printf "\n%b[SONGBIRD] %s%b\n" "$COLOR_SUCCESS" "$title" "$COLOR_RESET"
+  for line in "${lines[@]}"; do
+    if [[ -z "$line" ]]; then
+      printf "\n"
+    else
+      printf "%b%s%b\n" "$COLOR_SUCCESS" "$line" "$COLOR_RESET"
+    fi
+  done
+  printf "\n"
+}
+
+print_success_frame() {
+  local title="$1"
+  shift || true
+
+  local lines=("$@")
+  local terminal_width=""
+  terminal_width="$(terminal_columns)"
+  local frame_width=$((terminal_width - 4))
+
+  if (( frame_width < 40 )); then
+    print_plain_success_block "$title" "${lines[@]}"
+    if [[ -f "$LOG_FILE" ]]; then
+      local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+      printf "[%s] [SONGBIRD] %s\n" "$timestamp" "$title" >> "$LOG_FILE" 2>/dev/null || true
+      local line=""
+      for line in "${lines[@]}"; do
+        printf "[%s] [SONGBIRD] %s\n" "$timestamp" "$line" >> "$LOG_FILE" 2>/dev/null || true
+      done
+    fi
+    return 0
+  fi
+  if (( frame_width > 100 )); then
+    frame_width=100
+  fi
+
+  local content_width=$((frame_width - 4))
+  local wrapped_lines=()
+  local line=""
+  local segment=""
+  for line in "${lines[@]}"; do
+    while IFS= read -r segment; do
+      wrapped_lines+=("$segment")
+    done < <(wrap_success_line "$line" "$content_width")
+  done
+
+  local border=""
+  printf -v border '%*s' "$((content_width + 2))" ""
+  border="${border// /-}"
+
+  printf "\n%b+%s+%b\n" "$COLOR_SUCCESS" "$border" "$COLOR_RESET"
+  while IFS= read -r segment; do
+    printf "%b| %-*s |%b\n" "$COLOR_SUCCESS" "$content_width" "$segment" "$COLOR_RESET"
+  done < <(wrap_success_line "$title" "$content_width")
+  printf "%b+%s+%b\n" "$COLOR_SUCCESS" "$border" "$COLOR_RESET"
+  for line in "${wrapped_lines[@]}"; do
+    printf "%b| %-*s |%b\n" "$COLOR_SUCCESS" "$content_width" "$line" "$COLOR_RESET"
+  done
+  printf "%b+%s+%b\n\n" "$COLOR_SUCCESS" "$border" "$COLOR_RESET"
+
+  if [[ -f "$LOG_FILE" ]]; then
+    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    printf "[%s] [SONGBIRD] %s\n" "$timestamp" "$title" >> "$LOG_FILE" 2>/dev/null || true
+    for line in "${lines[@]}"; do
+      printf "[%s] [SONGBIRD] %s\n" "$timestamp" "$line" >> "$LOG_FILE" 2>/dev/null || true
+    done
+  fi
+}
+
+show_deployment_success_frame() {
+  local action="$1"
+  local title=""
+  local lines=()
+
+  case "$action" in
+    install)
+      title="Songbird Installation Complete"
+      lines+=("Songbird has been installed successfully.")
+      lines+=("")
+      lines+=("App:")
+      if [[ "$CERT_MODE" == "http" ]]; then
+        if [[ "$DEPLOY_MODE" == "domain" ]]; then
+          local d=""
+          for d in "${DOMAIN_NAMES[@]}"; do
+            lines+=("Visit: http://${d}:${CLIENT_PORT}")
+          done
+        else
+          lines+=("Visit: http://<your-server-ip>:${CLIENT_PORT}")
+        fi
+      elif [[ "$DEPLOY_MODE" == "domain" ]]; then
+        local d=""
+        for d in "${DOMAIN_NAMES[@]}"; do
+          if [[ "$CLIENT_PORT" == "443" ]]; then
+            lines+=("Visit: https://${d}")
+          else
+            lines+=("Visit: https://${d}:${CLIENT_PORT}")
+          fi
+        done
+      else
+        local visit_ip="${CERTBOT_IP_ADDRESS:-<your-server-ip>}"
+        if [[ "$CERT_MODE" == "files" ]]; then
+          visit_ip="<your-server-ip>"
+        fi
+        if [[ "$CLIENT_PORT" == "443" ]]; then
+          lines+=("Visit: https://${visit_ip}")
+        else
+          lines+=("Visit: https://${visit_ip}:${CLIENT_PORT}")
+        fi
+      fi
+      ;;
+    update)
+      title="Songbird Update Complete"
+      lines+=("Songbird has been updated successfully.")
+      lines+=("Service restarted and nginx reloaded.")
+      ;;
+    *)
+      title="Songbird Success"
+      lines+=("Operation completed successfully.")
+      ;;
+  esac
+
+  lines+=("")
+  lines+=("Links:")
+  lines+=("GitHub: ${SONGBIRD_SOCIAL_GITHUB}")
+  lines+=("Telegram: ${SONGBIRD_SOCIAL_TELEGRAM}")
+  lines+=("Main Server Channel: ${SONGBIRD_SOCIAL_WEBSITE}")
+  lines+=("Support: ${SONGBIRD_NOWPAYMENTS}")
+
+  print_success_frame "$title" "${lines[@]}"
 }
 
 have_cmd() {
@@ -130,10 +427,29 @@ have_cmd() {
 }
 
 press_enter_to_continue() {
+  MENU_ACTION_PAUSED="1"
   printf "\nPress Enter to return to the main menu..." >&$PROMPT_FD_OUT
   if ! IFS= read -r -u "$PROMPT_FD" _; then
     _=""
   fi
+}
+
+run_menu_action() {
+  local action="$1"
+  shift || true
+  MENU_ACTION_PAUSED="0"
+
+  "$action" "$@"
+  local status=$?
+  if [[ "$status" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "${MENU_ACTION_PAUSED:-0}" != "1" ]]; then
+    warn "Action failed. Review ${LOG_FILE} for details, then retry from the menu."
+    press_enter_to_continue
+  fi
+  return "$status"
 }
 
 run_silent() {
@@ -149,7 +465,7 @@ run_silent() {
       printf "[%s] FAILED: %s\n%s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*" "$output" >> "$LOG_FILE" 2>/dev/null || true
     fi
     # Show error to user
-    printf "\n[ERROR] Command failed: %s\n" "$*"
+    printf "\n%b[ERROR] Command failed: %s%b\n" "$COLOR_ERROR" "$*" "$COLOR_RESET"
     printf "%s\n" "$output"
     return 1
   else
@@ -215,14 +531,26 @@ run_as_root_output() {
 }
 
 run_in_install_dir() {
-  run_silent run_as_root bash -lc "cd '$INSTALL_DIR' && $*"
+  local path_prefix=""
+  local path_export=""
+  path_prefix="$(node_tools_path_prefix)"
+  if [[ -n "$path_prefix" ]]; then
+    path_export="export PATH=$(printf '%q' "$path_prefix"):\$PATH; "
+  fi
+  run_silent run_as_root bash -lc "cd '$INSTALL_DIR' && ${path_export}$*"
 }
 
 run_in_install_dir_output() {
+  local path_prefix=""
+  local path_export=""
+  path_prefix="$(node_tools_path_prefix)"
+  if [[ -n "$path_prefix" ]]; then
+    path_export="export PATH=$(printf '%q' "$path_prefix"):\$PATH; "
+  fi
   if [[ -n "$SUDO" ]]; then
-    $SUDO bash -lc "cd '$INSTALL_DIR' && $*"
+    $SUDO bash -lc "cd '$INSTALL_DIR' && ${path_export}$*"
   else
-    bash -lc "cd '$INSTALL_DIR' && $*"
+    bash -lc "cd '$INSTALL_DIR' && ${path_export}$*"
   fi
 }
 
@@ -250,14 +578,14 @@ init_prompt_io() {
 }
 
 prompt_read() {
-  local prompt="$1"
-  local __result_var="$2"
-  local input=""
-  printf "%s" "$prompt" >&$PROMPT_FD_OUT
-  if ! IFS= read -r -u "$PROMPT_FD" input; then
-    input=""
+  local __prompt_text="$1"
+  local __prompt_result_var="$2"
+  local __prompt_value=""
+  printf "%s" "$__prompt_text" >&$PROMPT_FD_OUT
+  if ! IFS= read -r -u "$PROMPT_FD" __prompt_value; then
+    __prompt_value=""
   fi
-  printf -v "$__result_var" "%s" "$input"
+  printf -v "$__prompt_result_var" "%s" "$__prompt_value"
 }
 
 prompt_non_empty() {
@@ -477,9 +805,10 @@ configure_mirrors_menu() {
     printf $'2) 🔗  Set apt mirror source (current: %s)\n' "${MIRROR_APT_EXTRA:-<none>}"
     printf $'3) 🔗  Set npm registry mirror (current: %s)\n' "${MIRROR_NPM:-<default>}"
     printf $'4) 🔄️  Restore defaults (clear mirrors)\n'
-    printf $'5) ↩️  Go back\n\n'
+    printf $'5) ↩️  Go back\n'
+    printf $'0) 🚪  Exit\n\n'
 
-    prompt_read "Choose an option [1-5]: " choice
+    prompt_read "Choose an option [0-5]: " choice
     case "$choice" in
       1)
         local val=""
@@ -506,6 +835,7 @@ configure_mirrors_menu() {
         clear_mirror_values
         ;;
       5) return ;;
+      0) exit 0 ;;
       *) printf "Invalid choice. Select a number from 1 to 5.\n" ;;
     esac
   done
@@ -769,24 +1099,28 @@ install_required_packages() {
     fi
   done
 
-  local codename=$(lsb_release -sc)
+  local codename=""
+  codename="$(lsb_release -sc)" || return 1
   if [[ -n "$MIRROR_APT_EXTRA" ]]; then
     log "Refreshing apt package index (temporary mirror: ${MIRROR_APT_EXTRA})..."
-    run_silent run_as_root apt-get update \
+    if ! run_silent run_as_root apt-get update \
       -o Dir::Etc::sourcelist=/dev/null \
       -o Dir::Etc::sourceparts=/dev/null \
       -o Dir::Etc::sourcelist=- \
       -o Dir::Etc::sourceparts=- <<EOF
 deb ${MIRROR_APT_EXTRA} ${codename} main restricted universe multiverse
 EOF
+    then
+      return 1
+    fi
   else
     log "Refreshing apt package index..."
-    run_silent run_as_root apt-get update
+    run_silent run_as_root apt-get update || return 1
   fi
 
   if (( ${#missing_pkgs[@]} > 0 )); then
     log "Installing missing packages: ${missing_pkgs[*]}"
-    run_silent run_as_root apt-get install -y --allow-downgrades "${missing_pkgs[@]}"
+    run_silent run_as_root apt-get install -y --allow-downgrades "${missing_pkgs[@]}" || return 1
   else
     log "All required base packages are already installed."
   fi
@@ -811,10 +1145,16 @@ ensure_nodejs_from_nodesource() {
       tmp_dir="$(mktemp -d)"
       local tarball="${tmp_dir}/node.tar.gz"
 
-      curl -fsSL "$MIRROR_NODESOURCE" -o "$tarball"
+      curl -fsSL "$MIRROR_NODESOURCE" -o "$tarball" || {
+        rm -rf "$tmp_dir"
+        return 1
+      }
 
       local install_dir="/usr/local"
-      run_silent run_as_root tar -xzf "$tarball" -C "$install_dir" --strip-components=1
+      run_silent run_as_root tar -xzf "$tarball" -C "$install_dir" --strip-components=1 || {
+        rm -rf "$tmp_dir"
+        return 1
+      }
 
       rm -rf "$tmp_dir"
 
@@ -825,11 +1165,11 @@ ensure_nodejs_from_nodesource() {
       local setup_url="${MIRROR_NODESOURCE%/}/setup_${NODE_MAJOR}.x"
       log "Installing Node.js ${NODE_MAJOR}.x via NodeSource-style mirror: ${setup_url}"
       if [[ -n "$SUDO" ]]; then
-        curl -fsSL "$setup_url" | $SUDO -E bash -
+        curl -fsSL "$setup_url" | $SUDO -E bash - || return 1
       else
-        curl -fsSL "$setup_url" | bash -
+        curl -fsSL "$setup_url" | bash - || return 1
       fi
-      run_silent run_as_root apt-get install -y nodejs
+      run_silent run_as_root apt-get install -y nodejs || return 1
       return 0
     fi
   fi
@@ -838,11 +1178,11 @@ ensure_nodejs_from_nodesource() {
   local setup_url="https://deb.nodesource.com/setup_${NODE_MAJOR}.x"
   log "Installing Node.js ${NODE_MAJOR}.x via NodeSource..."
   if [[ -n "$SUDO" ]]; then
-    curl -fsSL "$setup_url" | $SUDO -E bash -
+    curl -fsSL "$setup_url" | $SUDO -E bash - || return 1
   else
-    curl -fsSL "$setup_url" | bash -
+    curl -fsSL "$setup_url" | bash - || return 1
   fi
-  run_silent run_as_root apt-get install -y nodejs
+  run_silent run_as_root apt-get install -y nodejs || return 1
 }
 
 resolve_node_exec_path() {
@@ -851,21 +1191,97 @@ resolve_node_exec_path() {
     node_path="$(command -v node)"
   elif have_cmd nodejs; then
     node_path="$(command -v nodejs)"
+  elif [[ -f "$SERVICE_FILE" ]]; then
+    node_path="$(grep -E '^ExecStart=' "$SERVICE_FILE" | head -n 1 | sed -E 's/^ExecStart=([^[:space:]]+).*/\1/' || true)"
+    if [[ ! -x "$node_path" ]]; then
+      node_path=""
+    fi
   fi
 
   if [[ -z "$node_path" ]]; then
-    fail "Node.js executable not found in PATH after installation."
+    warn "Node.js executable not found in PATH after installation."
+    return 1
   fi
 
   NODE_EXEC_PATH="$node_path"
   log "Using Node.js executable for systemd service: ${NODE_EXEC_PATH}"
 }
 
+resolve_npm_exec_path() {
+  local npm_path=""
+  if have_cmd npm; then
+    npm_path="$(command -v npm)"
+  fi
+
+  if [[ -z "$npm_path" && -z "$NODE_EXEC_PATH" ]]; then
+    resolve_node_exec_path >/dev/null 2>&1 || true
+  fi
+
+  if [[ -z "$npm_path" && -n "$NODE_EXEC_PATH" && -x "$(dirname "$NODE_EXEC_PATH")/npm" ]]; then
+    npm_path="$(dirname "$NODE_EXEC_PATH")/npm"
+  elif [[ -z "$npm_path" && -x /usr/bin/npm ]]; then
+    npm_path="/usr/bin/npm"
+  elif [[ -z "$npm_path" && -x /usr/local/bin/npm ]]; then
+    npm_path="/usr/local/bin/npm"
+  fi
+
+  if [[ -z "$npm_path" ]]; then
+    warn "npm executable not found. Install Node.js/npm or rerun the install/update flow."
+    return 1
+  fi
+
+  NPM_EXEC_PATH="$npm_path"
+}
+
+node_tools_path_prefix() {
+  local dirs=()
+  local dir=""
+  local existing=""
+
+  if [[ -z "$NODE_EXEC_PATH" ]]; then
+    resolve_node_exec_path >/dev/null 2>&1 || true
+  fi
+  if [[ -z "$NPM_EXEC_PATH" ]]; then
+    resolve_npm_exec_path >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "$NODE_EXEC_PATH" ]]; then
+    dir="$(dirname "$NODE_EXEC_PATH")"
+    [[ -d "$dir" ]] && dirs+=("$dir")
+  fi
+  if [[ -n "$NPM_EXEC_PATH" ]]; then
+    dir="$(dirname "$NPM_EXEC_PATH")"
+    [[ -d "$dir" ]] && dirs+=("$dir")
+  fi
+
+  local unique=()
+  for dir in "${dirs[@]}"; do
+    local seen="no"
+    for existing in "${unique[@]}"; do
+      if [[ "$existing" == "$dir" ]]; then
+        seen="yes"
+        break
+      fi
+    done
+    [[ "$seen" == "no" ]] && unique+=("$dir")
+  done
+
+  local prefix=""
+  for dir in "${unique[@]}"; do
+    if [[ -z "$prefix" ]]; then
+      prefix="$dir"
+    else
+      prefix="${prefix}:${dir}"
+    fi
+  done
+  printf "%s" "$prefix"
+}
+
 
 ensure_service_user_exists() {
   if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     log "Creating dedicated system user: ${SERVICE_USER}"
-    run_silent run_as_root useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
+    run_silent run_as_root useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" || return 1
   fi
 }
 
@@ -878,7 +1294,10 @@ map_lego_arch() {
     armv7l|armv7) printf "armv7" ;;
     armv6l|armv6) printf "armv6" ;;
     i386|i686) printf "386" ;;
-    *) fail "Unsupported architecture for lego binary install: ${machine}" ;;
+    *)
+      warn "Unsupported architecture for lego binary install: ${machine}"
+      return 1
+      ;;
   esac
 }
 
@@ -900,13 +1319,17 @@ ensure_lego_installed() {
 
   local latest_url=""
   latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/go-acme/lego/releases/latest)" || {
-    fail "Unable to resolve latest lego release URL."
+    warn "Unable to resolve latest lego release URL."
+    return 1
   }
   local latest_tag="${latest_url##*/}"
-  [[ -n "$latest_tag" ]] || fail "Unable to determine latest lego release tag."
+  if [[ -z "$latest_tag" ]]; then
+    warn "Unable to determine latest lego release tag."
+    return 1
+  fi
 
   local arch=""
-  arch="$(map_lego_arch)"
+  arch="$(map_lego_arch)" || return 1
   local asset="lego_${latest_tag}_linux_${arch}.tar.gz"
   local download_url="https://github.com/go-acme/lego/releases/download/${latest_tag}/${asset}"
   local tmp_dir=""
@@ -915,25 +1338,35 @@ ensure_lego_installed() {
   log "Downloading lego ${latest_tag} for linux/${arch}..."
   curl -fsSL "$download_url" -o "${tmp_dir}/${asset}" || {
     run_silent run_as_root rm -rf "$tmp_dir"
-    fail "Unable to download lego binary from ${download_url}"
+    warn "Unable to download lego binary from ${download_url}"
+    return 1
   }
 
-  run_silent run_as_root tar -xzf "${tmp_dir}/${asset}" -C "$tmp_dir"
-  run_silent run_as_root install -m 755 "${tmp_dir}/lego" "$LEGO_BIN"
-  run_silent run_as_root rm -rf "$tmp_dir"
+  run_silent run_as_root tar -xzf "${tmp_dir}/${asset}" -C "$tmp_dir" || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
+  run_silent run_as_root install -m 755 "${tmp_dir}/lego" "$LEGO_BIN" || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
+  run_silent run_as_root rm -rf "$tmp_dir" || return 1
   log "Installed lego at ${LEGO_BIN}."
 
-  lego_supports_shortlived_profile || fail "Installed lego at ${LEGO_BIN} does not support --profile. Please verify the binary and try again."
+  if ! lego_supports_shortlived_profile; then
+    warn "Installed lego at ${LEGO_BIN} does not support --profile. Please verify the binary and try again."
+    return 1
+  fi
 }
 
 clone_repo() {
-  run_silent run_as_root mkdir -p "$INSTALL_DIR"
+  run_silent run_as_root mkdir -p "$INSTALL_DIR" || return 1
 
   if run_as_root test -d "$INSTALL_DIR/.git"; then
     log "Repository exists at ${INSTALL_DIR}. Updating source..."
-    run_in_install_dir "git fetch --all --prune"
-    run_in_install_dir "git checkout main"
-    run_in_install_dir "git pull --ff-only origin main"
+    run_in_install_dir "git fetch --all --prune" || return 1
+    run_in_install_dir "git checkout main" || return 1
+    run_in_install_dir "git pull --ff-only origin main" || return 1
     return 0
   fi
 
@@ -942,12 +1375,12 @@ clone_repo() {
       warn "Installation canceled. Clear ${INSTALL_DIR} or use offline mode."
       return 1
     fi
-    run_as_root rm -rf "$INSTALL_DIR"
-    run_silent run_as_root mkdir -p "$INSTALL_DIR"
+    run_as_root rm -rf "$INSTALL_DIR" || return 1
+    run_silent run_as_root mkdir -p "$INSTALL_DIR" || return 1
   fi
 
   log "Cloning Songbird repository..."
-  run_silent run_as_root git clone "$REPO_URL" "$INSTALL_DIR"
+  run_silent run_as_root git clone "$REPO_URL" "$INSTALL_DIR" || return 1
 }
 
 prepare_install_dir_for_offline() {
@@ -1029,16 +1462,23 @@ ensure_offline_source_ready() {
 extract_offline_source_zip() {
   local zip_path="$1"
   local mode_label="$2"
-  have_cmd unzip || fail "unzip is required for offline ${mode_label}s. Install it first and retry."
+  if ! have_cmd unzip; then
+    warn "unzip is required for offline ${mode_label}s. Install it first and retry."
+    return 1
+  fi
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
-  run_silent run_as_root unzip -q "$zip_path" -d "$tmp_dir"
+  if ! run_silent run_as_root unzip -q "$zip_path" -d "$tmp_dir"; then
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  fi
 
   local source_root
   source_root="$(resolve_offline_source_root "$tmp_dir")" || {
     run_silent run_as_root rm -rf "$tmp_dir"
-    fail "Source zip does not appear to contain Songbird (missing server/client/package.json)."
+    warn "Source zip does not appear to contain Songbird (missing server/client/package.json)."
+    return 1
   }
 
   printf "%s|%s" "$tmp_dir" "$source_root"
@@ -1090,55 +1530,70 @@ install_source_from_zip() {
   local zip_path="$1"
   prepare_install_dir_for_offline || return 1
   local extract_result=""
-  extract_result="$(extract_offline_source_zip "$zip_path" "install")"
+  extract_result="$(extract_offline_source_zip "$zip_path" "install")" || return 1
   local tmp_dir="${extract_result%%|*}"
   local source_root="${extract_result#*|}"
 
   prepare_source_root_for_data_copy "$zip_path" "$source_root" "install"
 
-  run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/
+  run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/ || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
   if [[ -f "$source_root/.env.example" ]]; then
-    run_silent run_as_root cp -a "$source_root/.env.example" "$INSTALL_DIR/.env.example"
+    run_silent run_as_root cp -a "$source_root/.env.example" "$INSTALL_DIR/.env.example" || {
+      run_silent run_as_root rm -rf "$tmp_dir"
+      return 1
+    }
   fi
-  apply_ownership
-  run_silent run_as_root rm -rf "$tmp_dir"
+  apply_ownership || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
+  run_silent run_as_root rm -rf "$tmp_dir" || return 1
   return 0
 }
 
 update_source_from_zip() {
   local zip_path="$1"
   local extract_result=""
-  extract_result="$(extract_offline_source_zip "$zip_path" "update")"
+  extract_result="$(extract_offline_source_zip "$zip_path" "update")" || return 1
   local tmp_dir="${extract_result%%|*}"
   local source_root="${extract_result#*|}"
 
   prepare_source_root_for_data_copy "$zip_path" "$source_root" "update"
 
-  run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/
+  run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/ || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
   if [[ -f "$source_root/.env.example" ]]; then
-    run_silent run_as_root cp -a "$source_root/.env.example" "$INSTALL_DIR/.env.example"
+    run_silent run_as_root cp -a "$source_root/.env.example" "$INSTALL_DIR/.env.example" || {
+      run_silent run_as_root rm -rf "$tmp_dir"
+      return 1
+    }
   fi
-  apply_ownership
-  run_silent run_as_root rm -rf "$tmp_dir"
+  apply_ownership || {
+    run_silent run_as_root rm -rf "$tmp_dir"
+    return 1
+  }
+  run_silent run_as_root rm -rf "$tmp_dir" || return 1
 }
 
 install_songbird_dependencies() {
-  log "Installing server dependencies..."
+  local npm_registry_arg=""
   if [[ -n "$MIRROR_NPM" ]]; then
-    run_in_install_dir "npm --registry "$MIRROR_NPM" --prefix server install"
-  else
-    run_in_install_dir "npm --prefix server install"
+    npm_registry_arg="--registry $(printf '%q' "$MIRROR_NPM")"
   fi
+
+  log "Installing server dependencies..."
+  run_in_install_dir "npm ${npm_registry_arg} --prefix server install" || return 1
 
   log "Installing client dependencies..."
-  if [[ -n "$MIRROR_NPM" ]]; then
-    run_in_install_dir "npm --registry "$MIRROR_NPM" --prefix client install"
-  else
-    run_in_install_dir "npm --prefix client install"
-  fi
+  run_in_install_dir "npm ${npm_registry_arg} --prefix client install" || return 1
 
   log "Building client..."
-  run_in_install_dir "npm --prefix client run build"
+  run_in_install_dir "npm --prefix client run build" || return 1
 }
 
 get_existing_env_value() {
@@ -1183,6 +1638,45 @@ get_existing_env_value_with_fallback() {
   printf "%s" "$default"
 }
 
+bytes_to_mb_rounded_up() {
+  local bytes="$(printf "%s" "$1" | tr -d '[:space:]')"
+  if [[ -z "$bytes" || ! "$bytes" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  printf "%s" "$(((bytes + 1048576 - 1) / 1048576))"
+}
+
+get_existing_env_mb_value_with_fallback() {
+  local primary="$1"
+  local legacy_bytes_key="$2"
+  local default="$3"
+  local env_file="$INSTALL_DIR/.env"
+  if [[ ! -f "$env_file" ]]; then
+    printf "%s" "$default"
+    return 0
+  fi
+
+  local existing
+  existing="$(grep -E "^${primary}=" "$env_file" | tail -n 1 | cut -d "=" -f 2- || true)"
+  if [[ -n "$existing" ]]; then
+    printf "%s" "$existing"
+    return 0
+  fi
+
+  local legacy_bytes
+  legacy_bytes="$(grep -E "^${legacy_bytes_key}=" "$env_file" | tail -n 1 | cut -d "=" -f 2- || true)"
+  if [[ -n "$legacy_bytes" ]]; then
+    local converted=""
+    converted="$(bytes_to_mb_rounded_up "$legacy_bytes")" || converted=""
+    if [[ -n "$converted" ]]; then
+      printf "%s" "$converted"
+      return 0
+    fi
+  fi
+
+  printf "%s" "$default"
+}
+
 replace_env_value() {
   local env_file="$1"
   local key="$2"
@@ -1201,7 +1695,7 @@ write_env_from_example() {
   local example_file="${INSTALL_DIR}/.env.example"
   if [[ ! -f "$example_file" ]]; then
     log "Missing ${example_file}. Falling back to minimal .env defaults."
-    write_env_fallback "$env_file"
+    write_env_fallback "$env_file" || return 1
     CURRENT_ENV_FILE="$env_file"
     return 0
   fi
@@ -1210,37 +1704,50 @@ write_env_from_example() {
   local existing_subject
   local existing_server_port
   local existing_client_port
-  local existing_voice_waveform_max_decode_bytes
+  local existing_sign_up
+  local existing_file_upload_max_size_mb
+  local existing_file_upload_max_total_size_mb
+  local existing_voice_waveform_max_decode_mb
   local existing_voice_waveform_max_decode_seconds
+  local existing_nickname_max_chars
+  local existing_username_max_chars
   local existing_storage_encryption_key
   existing_public_key="$(get_existing_env_value "VAPID_PUBLIC_KEY" "")"
   existing_private_key="$(get_existing_env_value "VAPID_PRIVATE_KEY" "")"
   existing_subject="$(get_existing_env_value "VAPID_SUBJECT" "mailto:admin@example.com")"
   existing_server_port="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   existing_client_port="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
-  existing_voice_waveform_max_decode_bytes="$(get_existing_env_value "CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES" "$DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES")"
+  existing_sign_up="$(get_existing_env_value_with_fallback "SIGN_UP" "ACCOUNT_CREATION" "$DEFAULT_SIGN_UP")"
+  existing_file_upload_max_size_mb="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_SIZE_MB" "FILE_UPLOAD_MAX_SIZE" "$DEFAULT_FILE_UPLOAD_MAX_SIZE_MB")"
+  existing_file_upload_max_total_size_mb="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
+  existing_voice_waveform_max_decode_mb="$(get_existing_env_mb_value_with_fallback "CHAT_VOICE_WAVEFORM_MAX_DECODE_MB" "CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES" "$DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_MB")"
   existing_voice_waveform_max_decode_seconds="$(get_existing_env_value "CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS" "$DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS")"
+  existing_nickname_max_chars="$(get_existing_env_value_with_fallback "NICKNAME_MAX_CHARS" "NICKNAME_MAX" "24")"
+  existing_username_max_chars="$(get_existing_env_value_with_fallback "USERNAME_MAX_CHARS" "USERNAME_MAX" "16")"
   existing_storage_encryption_key="$(get_existing_env_value "STORAGE_ENCRYPTION_KEY" "")"
 
-  run_silent run_as_root cp "$example_file" "$env_file"
-  replace_env_value "$env_file" "SERVER_PORT" "$existing_server_port"
-  replace_env_value "$env_file" "CLIENT_PORT" "$existing_client_port"
-  replace_env_value "$env_file" "SERVER_PORT" "$SERVER_PORT"
-  replace_env_value "$env_file" "CLIENT_PORT" "$CLIENT_PORT"
-  replace_env_value "$env_file" "ACCOUNT_CREATION" "$ACCOUNT_CREATION"
-  replace_env_value "$env_file" "FILE_UPLOAD" "$FILE_UPLOAD"
-  replace_env_value "$env_file" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$MAX_UPLOAD"
-  replace_env_value "$env_file" "MESSAGE_FILE_RETENTION" "$RETENTION_DAYS"
-  replace_env_value "$env_file" "MESSAGE_TEXT_RETENTION" "$TEXT_RETENTION_DAYS"
-  replace_env_value "$env_file" "CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES" "$existing_voice_waveform_max_decode_bytes"
-  replace_env_value "$env_file" "CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS" "$existing_voice_waveform_max_decode_seconds"
-  replace_env_value "$env_file" "STORAGE_ENCRYPTION_KEY" "$existing_storage_encryption_key"
-  replace_env_value "$env_file" "VAPID_PUBLIC_KEY" "$existing_public_key"
-  replace_env_value "$env_file" "VAPID_PRIVATE_KEY" "$existing_private_key"
+  run_silent run_as_root cp "$example_file" "$env_file" || return 1
+  replace_env_value "$env_file" "SERVER_PORT" "$existing_server_port" || return 1
+  replace_env_value "$env_file" "CLIENT_PORT" "$existing_client_port" || return 1
+  replace_env_value "$env_file" "SERVER_PORT" "$SERVER_PORT" || return 1
+  replace_env_value "$env_file" "CLIENT_PORT" "$CLIENT_PORT" || return 1
+  replace_env_value "$env_file" "SIGN_UP" "$ACCOUNT_CREATION" || return 1
+  replace_env_value "$env_file" "FILE_UPLOAD" "$FILE_UPLOAD" || return 1
+  replace_env_value "$env_file" "FILE_UPLOAD_MAX_SIZE_MB" "$existing_file_upload_max_size_mb" || return 1
+  replace_env_value "$env_file" "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "$MAX_UPLOAD_MB" || return 1
+  replace_env_value "$env_file" "MESSAGE_FILE_RETENTION" "$RETENTION_DAYS" || return 1
+  replace_env_value "$env_file" "MESSAGE_TEXT_RETENTION" "$TEXT_RETENTION_DAYS" || return 1
+  replace_env_value "$env_file" "CHAT_VOICE_WAVEFORM_MAX_DECODE_MB" "$existing_voice_waveform_max_decode_mb" || return 1
+  replace_env_value "$env_file" "CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS" "$existing_voice_waveform_max_decode_seconds" || return 1
+  replace_env_value "$env_file" "NICKNAME_MAX_CHARS" "$existing_nickname_max_chars" || return 1
+  replace_env_value "$env_file" "USERNAME_MAX_CHARS" "$existing_username_max_chars" || return 1
+  replace_env_value "$env_file" "STORAGE_ENCRYPTION_KEY" "$existing_storage_encryption_key" || return 1
+  replace_env_value "$env_file" "VAPID_PUBLIC_KEY" "$existing_public_key" || return 1
+  replace_env_value "$env_file" "VAPID_PRIVATE_KEY" "$existing_private_key" || return 1
   if [[ -n "$CERTBOT_EMAIL" ]]; then
-    replace_env_value "$env_file" "VAPID_SUBJECT" "mailto:${CERTBOT_EMAIL}"
+    replace_env_value "$env_file" "VAPID_SUBJECT" "mailto:${CERTBOT_EMAIL}" || return 1
   else
-    replace_env_value "$env_file" "VAPID_SUBJECT" "$existing_subject"
+    replace_env_value "$env_file" "VAPID_SUBJECT" "$existing_subject" || return 1
   fi
   CURRENT_ENV_FILE="$env_file"
   log "Wrote environment config from ${example_file}."
@@ -1261,10 +1768,10 @@ SERVER_PORT=${SERVER_PORT}
 CLIENT_PORT=${CLIENT_PORT}
 APP_ENV=production
 APP_DEBUG=false
-ACCOUNT_CREATION=${ACCOUNT_CREATION}
+SIGN_UP=${ACCOUNT_CREATION}
 FILE_UPLOAD=${FILE_UPLOAD}
-FILE_UPLOAD_MAX_SIZE=26214400
-FILE_UPLOAD_MAX_TOTAL_SIZE=${MAX_UPLOAD}
+FILE_UPLOAD_MAX_SIZE_MB=${DEFAULT_FILE_UPLOAD_MAX_SIZE_MB}
+FILE_UPLOAD_MAX_TOTAL_SIZE_MB=${MAX_UPLOAD_MB}
 FILE_UPLOAD_MAX_FILES=10
 FILE_UPLOAD_TRANSCODE_VIDEOS=true
 MESSAGE_FILE_RETENTION=${RETENTION_DAYS}
@@ -1283,17 +1790,17 @@ CHAT_PEER_PRESENCE_POLL_INTERVAL=3000
 CHAT_HEALTH_CHECK_INTERVAL=10000
 CHAT_SSE_RECONNECT_DELAY=2000
 CHAT_SEARCH_MAX_RESULTS=5
-CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES=${DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES}
+CHAT_VOICE_WAVEFORM_MAX_DECODE_MB=${DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_MB}
 CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS=${DEFAULT_CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS}
-NICKNAME_MAX=24
-USERNAME_MAX=16
+NICKNAME_MAX_CHARS=24
+USERNAME_MAX_CHARS=16
 STORAGE_ENCRYPTION_KEY=${existing_storage_encryption_key}
 VAPID_PUBLIC_KEY=${existing_public_key}
 VAPID_PRIVATE_KEY=${existing_private_key}
 VAPID_SUBJECT=${existing_subject}
-EOF"
+EOF" || return 1
   if [[ -n "$CERTBOT_EMAIL" ]]; then
-    replace_env_value "$env_file" "VAPID_SUBJECT" "mailto:${CERTBOT_EMAIL}"
+    replace_env_value "$env_file" "VAPID_SUBJECT" "mailto:${CERTBOT_EMAIL}" || return 1
   fi
   log "Wrote fallback environment config to ${env_file}."
 }
@@ -1310,7 +1817,13 @@ ensure_vapid_keys() {
   fi
   log "Generating VAPID keys..."
   local keys
-  keys="$(run_as_root_output bash -lc "cd '$INSTALL_DIR/server' && node --input-type=module -e \"import pkg from 'web-push'; const { generateVAPIDKeys } = pkg; const k = generateVAPIDKeys(); console.log(k.publicKey); console.log(k.privateKey);\"")" || {
+  local path_prefix=""
+  local path_export=""
+  path_prefix="$(node_tools_path_prefix)"
+  if [[ -n "$path_prefix" ]]; then
+    path_export="export PATH=$(printf '%q' "$path_prefix"):\$PATH; "
+  fi
+  keys="$(run_as_root_output bash -lc "cd '$INSTALL_DIR/server' && ${path_export}node --input-type=module -e \"import pkg from 'web-push'; const { generateVAPIDKeys } = pkg; const k = generateVAPIDKeys(); console.log(k.publicKey); console.log(k.privateKey);\"")" || {
     warn "Failed to generate VAPID keys. Make sure server dependencies are installed."
     return 1
   }
@@ -1320,8 +1833,8 @@ ensure_vapid_keys() {
   if [[ -z "$new_public" || -z "$new_private" ]]; then
     return 1
   fi
-  replace_env_value "$env_file" "VAPID_PUBLIC_KEY" "$new_public"
-  replace_env_value "$env_file" "VAPID_PRIVATE_KEY" "$new_private"
+  replace_env_value "$env_file" "VAPID_PUBLIC_KEY" "$new_public" || return 1
+  replace_env_value "$env_file" "VAPID_PRIVATE_KEY" "$new_private" || return 1
   log "VAPID keys generated and saved to ${env_file}."
 }
 
@@ -1348,16 +1861,18 @@ sync_values_from_env() {
   SERVER_PORT="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   CLIENT_PORT="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
   FILE_UPLOAD="$(get_existing_env_value "FILE_UPLOAD" "$DEFAULT_FILE_UPLOAD")"
-  MAX_UPLOAD="$(get_existing_env_value "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD")"
+  MAX_UPLOAD_MB="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
   RETENTION_DAYS="$(get_existing_env_value "MESSAGE_FILE_RETENTION" "$DEFAULT_RETENTION_DAYS")"
   TEXT_RETENTION_DAYS="$(get_existing_env_value "MESSAGE_TEXT_RETENTION" "$DEFAULT_TEXT_RETENTION_DAYS")"
-  ACCOUNT_CREATION="$(get_existing_env_value "ACCOUNT_CREATION" "$DEFAULT_ACCOUNT_CREATION")"
+  ACCOUNT_CREATION="$(get_existing_env_value_with_fallback "SIGN_UP" "ACCOUNT_CREATION" "$DEFAULT_SIGN_UP")"
   CURRENT_ENV_FILE="$env_file"
 }
 
 parse_domain_input() {
   local raw="$1"
   DOMAIN_NAMES=()
+  DOMAIN_GROUPS=()
+  local seen_names=""
   local IFS=','
   local d
   for d in $raw; do
@@ -1366,9 +1881,110 @@ parse_domain_input() {
     d="${d#http://}"
     d="${d#https://}"
     d="${d%%/*}"
-    [[ -n "$d" ]] && DOMAIN_NAMES+=("$d")
+    d="${d%.}"
+    d="$(printf '%s' "$d" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "$d" && "$seen_names" != *"|${d}|"* ]]; then
+      DOMAIN_NAMES+=("$d")
+      seen_names="${seen_names}|${d}|"
+    fi
   done
+  build_domain_groups
   NGINX_SERVER_NAME="${DOMAIN_NAMES[*]}"
+}
+
+build_domain_groups() {
+  DOMAIN_GROUPS=()
+
+  if (( ${#DOMAIN_NAMES[@]} == 0 )); then
+    return 0
+  fi
+
+  local grouped_names="|"
+  local domain=""
+  for domain in "${DOMAIN_NAMES[@]}"; do
+    if [[ "$grouped_names" == *"|${domain}|"* ]]; then
+      continue
+    fi
+
+    local partner=""
+    if [[ "$domain" == www.* ]]; then
+      partner="${domain#www.}"
+      if [[ -n "$partner" && "$grouped_names" != *"|${partner}|"* && " ${DOMAIN_NAMES[*]} " == *" ${partner} "* ]]; then
+        DOMAIN_GROUPS+=("${partner},${domain}")
+        grouped_names="${grouped_names}${partner}|${domain}|"
+        continue
+      fi
+    else
+      partner="www.${domain}"
+      if [[ "$grouped_names" != *"|${partner}|"* && " ${DOMAIN_NAMES[*]} " == *" ${partner} "* ]]; then
+        DOMAIN_GROUPS+=("${domain},${partner}")
+        grouped_names="${grouped_names}${domain}|${partner}|"
+        continue
+      fi
+    fi
+
+    DOMAIN_GROUPS+=("${domain}")
+    grouped_names="${grouped_names}${domain}|"
+  done
+}
+
+group_csv_to_space_list() {
+  local csv="${1:-}"
+  printf '%s' "${csv//,/ }"
+}
+
+group_primary_domain() {
+  local csv="${1:-}"
+  printf '%s' "${csv%%,*}"
+}
+
+manual_cert_group_install_dir() {
+  local group_csv="${1:-}"
+  local primary_domain=""
+  primary_domain="$(group_primary_domain "$group_csv")"
+  printf '%s/%s' "$CERT_INSTALL_DIR" "$primary_domain"
+}
+
+manual_group_fullchain_path() {
+  local group_csv="${1:-}"
+  printf '%s/fullchain.pem' "$(manual_cert_group_install_dir "$group_csv")"
+}
+
+manual_group_privkey_path() {
+  local group_csv="${1:-}"
+  printf '%s/privkey.pem' "$(manual_cert_group_install_dir "$group_csv")"
+}
+
+log_domain_groups() {
+  if (( ${#DOMAIN_GROUPS[@]} == 0 )); then
+    return 0
+  fi
+
+  local idx=1
+  local group_csv=""
+  for group_csv in "${DOMAIN_GROUPS[@]}"; do
+    log "Detected domain group ${idx}: $(group_csv_to_space_list "$group_csv")"
+    idx=$((idx + 1))
+  done
+}
+
+build_domain_cert_groups() {
+  local __result_var="$1"
+  local serialized=""
+
+  if [[ ! "$__result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+
+  eval "$__result_var=()"
+
+  if [[ "$DEPLOY_MODE" != "domain" ]]; then
+    return 0
+  fi
+
+  serialized="$(declare -p DOMAIN_GROUPS)"
+  serialized="${serialized#declare -a DOMAIN_GROUPS=}"
+  eval "$__result_var=$serialized"
 }
 
 
@@ -1384,6 +2000,7 @@ collect_install_options() {
       if [[ -n "$raw_domains" ]]; then
         parse_domain_input "$raw_domains"
         if (( ${#DOMAIN_NAMES[@]} > 0 )); then
+          log_domain_groups
           break
         fi
       fi
@@ -1404,22 +2021,48 @@ collect_install_options() {
       fi
       ;;
     files)
-      while true; do
-        MANUAL_CERT_FULLCHAIN_PATH="$(prompt_non_empty "Enter path to fullchain.pem")"
-        MANUAL_CERT_FULLCHAIN_PATH="$(resolve_file_path "$MANUAL_CERT_FULLCHAIN_PATH")" || MANUAL_CERT_FULLCHAIN_PATH=""
-        if [[ -n "$MANUAL_CERT_FULLCHAIN_PATH" ]]; then
-          break
-        fi
-        printf "Could not find that fullchain.pem file.\n"
-      done
-      while true; do
-        MANUAL_CERT_PRIVKEY_PATH="$(prompt_non_empty "Enter path to privkey.pem")"
-        MANUAL_CERT_PRIVKEY_PATH="$(resolve_file_path "$MANUAL_CERT_PRIVKEY_PATH")" || MANUAL_CERT_PRIVKEY_PATH=""
-        if [[ -n "$MANUAL_CERT_PRIVKEY_PATH" ]]; then
-          break
-        fi
-        printf "Could not find that privkey.pem file.\n"
-      done
+      MANUAL_CERT_GROUP_FULLCHAIN_PATHS=()
+      MANUAL_CERT_GROUP_PRIVKEY_PATHS=()
+      if [[ "$DEPLOY_MODE" == "domain" ]]; then
+        local group_csv=""
+        for group_csv in "${DOMAIN_GROUPS[@]}"; do
+          while true; do
+            MANUAL_CERT_FULLCHAIN_PATH="$(prompt_non_empty "Enter path to fullchain.pem for $(group_csv_to_space_list "$group_csv")")"
+            MANUAL_CERT_FULLCHAIN_PATH="$(resolve_file_path "$MANUAL_CERT_FULLCHAIN_PATH")" || MANUAL_CERT_FULLCHAIN_PATH=""
+            if [[ -n "$MANUAL_CERT_FULLCHAIN_PATH" ]]; then
+              MANUAL_CERT_GROUP_FULLCHAIN_PATHS+=("$MANUAL_CERT_FULLCHAIN_PATH")
+              break
+            fi
+            printf "Could not find that fullchain.pem file.\n"
+          done
+          while true; do
+            MANUAL_CERT_PRIVKEY_PATH="$(prompt_non_empty "Enter path to privkey.pem for $(group_csv_to_space_list "$group_csv")")"
+            MANUAL_CERT_PRIVKEY_PATH="$(resolve_file_path "$MANUAL_CERT_PRIVKEY_PATH")" || MANUAL_CERT_PRIVKEY_PATH=""
+            if [[ -n "$MANUAL_CERT_PRIVKEY_PATH" ]]; then
+              MANUAL_CERT_GROUP_PRIVKEY_PATHS+=("$MANUAL_CERT_PRIVKEY_PATH")
+              break
+            fi
+            printf "Could not find that privkey.pem file.\n"
+          done
+        done
+      else
+        while true; do
+          MANUAL_CERT_FULLCHAIN_PATH="$(prompt_non_empty "Enter path to fullchain.pem")"
+          MANUAL_CERT_FULLCHAIN_PATH="$(resolve_file_path "$MANUAL_CERT_FULLCHAIN_PATH")" || MANUAL_CERT_FULLCHAIN_PATH=""
+          if [[ -n "$MANUAL_CERT_FULLCHAIN_PATH" ]]; then
+            break
+          fi
+          printf "Could not find that fullchain.pem file.\n"
+        done
+        while true; do
+          MANUAL_CERT_PRIVKEY_PATH="$(prompt_non_empty "Enter path to privkey.pem")"
+          MANUAL_CERT_PRIVKEY_PATH="$(resolve_file_path "$MANUAL_CERT_PRIVKEY_PATH")" || MANUAL_CERT_PRIVKEY_PATH=""
+          if [[ -n "$MANUAL_CERT_PRIVKEY_PATH" ]]; then
+            break
+          fi
+          printf "Could not find that privkey.pem file.\n"
+        done
+      fi
       ;;
   esac
 
@@ -1456,20 +2099,22 @@ collect_install_options() {
 }
 
 write_full_env_with_defaults() {
-  run_silent run_as_root mkdir -p "$INSTALL_DIR"
-  write_env_from_example
+  run_silent run_as_root mkdir -p "$INSTALL_DIR" || return 1
+  write_env_from_example || return 1
 }
 
 apply_ownership() {
-  ensure_service_user_exists
-  run_silent run_as_root chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$INSTALL_DIR"
-  run_silent run_as_root git config --global --add safe.directory "$INSTALL_DIR"
+  ensure_service_user_exists || return 1
+  run_silent run_as_root chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$INSTALL_DIR" || return 1
+  run_silent run_as_root git config --global --add safe.directory "$INSTALL_DIR" || return 1
 }
 
 configure_systemd_service() {
   log "Creating systemd service at ${SERVICE_FILE}..."
-  [[ -n "$NODE_EXEC_PATH" ]] || resolve_node_exec_path
-  run_silent run_as_root tee "$SERVICE_FILE" >/dev/null <<EOF
+  if [[ -z "$NODE_EXEC_PATH" ]]; then
+    resolve_node_exec_path || return 1
+  fi
+  if ! run_silent run_as_root tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=Songbird server
 After=network.target
@@ -1486,28 +2131,40 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+  then
+    return 1
+  fi
 
-  run_as_root systemctl daemon-reload
-  run_as_root systemctl enable --now songbird.service
-  run_as_root systemctl restart songbird.service
+  run_as_root systemctl daemon-reload || return 1
+  run_as_root systemctl enable --now songbird.service || return 1
+  run_as_root systemctl restart songbird.service || return 1
 }
 
 write_nginx_site_config() {
   local mode="${1:-http}"
   local cert_path="${2:-}"
   local key_path="${3:-}"
-  local server_name_line="server_name ${NGINX_SERVER_NAME};"
-  local listen_line="listen ${CLIENT_PORT} default_server;"
   local ssl_block=""
   local acme_block=""
   local redirect_server_block=""
+  local config_body=""
+  local listen_line="listen ${CLIENT_PORT} default_server;"
+  local alternate_listen_line="listen ${CLIENT_PORT};"
+  local domain_group_csv=""
+  local domain_group_names=""
+  local primary_domain=""
+  local cert_line_path="$cert_path"
+  local key_line_path="$key_path"
+  local current_listen_line=""
 
   if [[ "$mode" == "http" && "$DEPLOY_MODE" == "domain" && "$CERT_MODE" == "certbot" ]]; then
     listen_line="listen 80 default_server;"
+    alternate_listen_line="listen 80;"
   fi
 
   if [[ "$mode" == "ssl" ]]; then
     listen_line="listen ${CLIENT_PORT} ssl default_server;"
+    alternate_listen_line="listen ${CLIENT_PORT} ssl;"
     ssl_block=$(cat <<EOF
   ssl_certificate ${cert_path};
   ssl_certificate_key ${key_path};
@@ -1568,11 +2225,85 @@ EOF
   fi
 
   log "Creating Nginx config at ${NGINX_SITE_FILE}..."
-  run_silent run_as_root tee "$NGINX_SITE_FILE" >/dev/null <<EOF
+  if [[ "$DEPLOY_MODE" == "domain" ]]; then
+    local domain_cert_groups=()
+    build_domain_cert_groups domain_cert_groups
+
+    for domain_group_csv in "${domain_cert_groups[@]}"; do
+      if [[ -z "$config_body" ]]; then
+        current_listen_line="$listen_line"
+      else
+        current_listen_line="$alternate_listen_line"
+      fi
+
+      domain_group_names="$(group_csv_to_space_list "$domain_group_csv")"
+      primary_domain="$(group_primary_domain "$domain_group_csv")"
+
+      if [[ "$mode" == "ssl" && "$CERT_MODE" == "certbot" ]]; then
+        cert_line_path="/etc/letsencrypt/live/${primary_domain}/fullchain.pem"
+        key_line_path="/etc/letsencrypt/live/${primary_domain}/privkey.pem"
+        ssl_block=$(cat <<EOF
+  ssl_certificate ${cert_line_path};
+  ssl_certificate_key ${key_line_path};
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 1d;
+EOF
+)
+      elif [[ "$mode" == "ssl" && "$CERT_MODE" == "files" ]]; then
+        cert_line_path="$(manual_group_fullchain_path "$domain_group_csv")"
+        key_line_path="$(manual_group_privkey_path "$domain_group_csv")"
+        ssl_block=$(cat <<EOF
+  ssl_certificate ${cert_line_path};
+  ssl_certificate_key ${key_line_path};
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 1d;
+EOF
+)
+      fi
+
+      config_body+=$(cat <<EOF
+server {
+  ${current_listen_line}
+  server_name ${domain_group_names};
+  client_max_body_size ${MAX_UPLOAD_MB}m;
+${ssl_block}
+
+  location /api/events {
+    proxy_pass http://127.0.0.1:${SERVER_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+    proxy_buffering off;
+    proxy_cache off;
+    add_header X-Accel-Buffering no;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:${SERVER_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_cache_bypass \$http_upgrade;
+  }
+}
+
+EOF
+)
+    done
+  else
+    config_body=$(cat <<EOF
 server {
   ${listen_line}
-  ${server_name_line}
-  client_max_body_size ${MAX_UPLOAD};
+  server_name ${NGINX_SERVER_NAME};
+  client_max_body_size ${MAX_UPLOAD_MB}m;
 ${ssl_block}
 ${acme_block}
 
@@ -1602,23 +2333,28 @@ ${acme_block}
     proxy_cache_bypass \$http_upgrade;
   }
 }
-${redirect_server_block}
+EOF
+)
+  fi
+
+  run_silent run_as_root tee "$NGINX_SITE_FILE" >/dev/null <<EOF
+${config_body}${redirect_server_block}
 EOF
 }
 
 configure_nginx() {
   log "Preparing initial HTTP nginx configuration..."
-  write_nginx_site_config "http"
+  write_nginx_site_config "http" || return 1
 
-  run_as_root ln -sfn "$NGINX_SITE_FILE" "$NGINX_ENABLED_FILE"
+  run_as_root ln -sfn "$NGINX_SITE_FILE" "$NGINX_ENABLED_FILE" || return 1
   if run_as_root test -f /etc/nginx/sites-enabled/default; then
-    run_as_root rm -f /etc/nginx/sites-enabled/default
+    run_as_root rm -f /etc/nginx/sites-enabled/default || return 1
   fi
 
   log "Testing nginx configuration..."
-  run_as_root nginx -t
+  run_as_root nginx -t || return 1
   log "Reloading nginx..."
-  run_as_root systemctl reload nginx
+  run_as_root systemctl reload nginx || return 1
   log "Initial nginx configuration is active."
 }
 
@@ -1626,25 +2362,61 @@ install_ssl_files_into_nginx() {
   local cert_path="$1"
   local key_path="$2"
 
-  write_nginx_site_config "ssl" "$cert_path" "$key_path"
-  run_as_root nginx -t
-  run_as_root systemctl reload nginx
+  write_nginx_site_config "ssl" "$cert_path" "$key_path" || return 1
+  run_as_root nginx -t || return 1
+  run_as_root systemctl reload nginx || return 1
   log "Nginx SSL configured."
 }
 
 configure_manual_ssl_files() {
-  if [[ ! -f "$MANUAL_CERT_FULLCHAIN_PATH" || ! -f "$MANUAL_CERT_PRIVKEY_PATH" ]]; then
-    fail "Manual certificate files were not found."
+  if [[ "$DEPLOY_MODE" == "domain" ]]; then
+    local idx=0
+    local group_csv=""
+    run_silent run_as_root mkdir -p "$CERT_INSTALL_DIR" || return 1
+    for group_csv in "${DOMAIN_GROUPS[@]}"; do
+      local source_fullchain="${MANUAL_CERT_GROUP_FULLCHAIN_PATHS[$idx]:-}"
+      local source_privkey="${MANUAL_CERT_GROUP_PRIVKEY_PATHS[$idx]:-}"
+      local install_dir=""
+      install_dir="$(manual_cert_group_install_dir "$group_csv")"
+      local installed_fullchain=""
+      installed_fullchain="$(manual_group_fullchain_path "$group_csv")"
+      local installed_privkey=""
+      installed_privkey="$(manual_group_privkey_path "$group_csv")"
+
+      if [[ ! -f "$source_fullchain" || ! -f "$source_privkey" ]]; then
+        warn "Manual certificate files were not found for group: $(group_csv_to_space_list "$group_csv")"
+        return 1
+      fi
+
+      run_silent run_as_root mkdir -p "$install_dir" || return 1
+      run_silent run_as_root rm -f "$installed_fullchain" "$installed_privkey" || return 1
+      run_silent run_as_root cp -Lf "$source_fullchain" "$installed_fullchain" || return 1
+      run_silent run_as_root cp -Lf "$source_privkey" "$installed_privkey" || return 1
+      run_silent run_as_root chmod 644 "$installed_fullchain" || return 1
+      run_silent run_as_root chmod 600 "$installed_privkey" || return 1
+      idx=$((idx + 1))
+    done
+
+    write_nginx_site_config "ssl" || return 1
+    run_as_root nginx -t || return 1
+    run_as_root systemctl reload nginx || return 1
+    log "Nginx SSL configured."
+    return 0
   fi
 
-  run_silent run_as_root mkdir -p "$CERT_INSTALL_DIR"
-  run_silent run_as_root rm -f "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem"
-  run_silent run_as_root cp -Lf "$MANUAL_CERT_FULLCHAIN_PATH" "$CERT_INSTALL_DIR/fullchain.pem"
-  run_silent run_as_root cp -Lf "$MANUAL_CERT_PRIVKEY_PATH" "$CERT_INSTALL_DIR/privkey.pem"
-  run_silent run_as_root chmod 644 "$CERT_INSTALL_DIR/fullchain.pem"
-  run_silent run_as_root chmod 600 "$CERT_INSTALL_DIR/privkey.pem"
+  if [[ ! -f "$MANUAL_CERT_FULLCHAIN_PATH" || ! -f "$MANUAL_CERT_PRIVKEY_PATH" ]]; then
+    warn "Manual certificate files were not found."
+    return 1
+  fi
 
-  install_ssl_files_into_nginx "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem"
+  run_silent run_as_root mkdir -p "$CERT_INSTALL_DIR" || return 1
+  run_silent run_as_root rm -f "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem" || return 1
+  run_silent run_as_root cp -Lf "$MANUAL_CERT_FULLCHAIN_PATH" "$CERT_INSTALL_DIR/fullchain.pem" || return 1
+  run_silent run_as_root cp -Lf "$MANUAL_CERT_PRIVKEY_PATH" "$CERT_INSTALL_DIR/privkey.pem" || return 1
+  run_silent run_as_root chmod 644 "$CERT_INSTALL_DIR/fullchain.pem" || return 1
+  run_silent run_as_root chmod 600 "$CERT_INSTALL_DIR/privkey.pem" || return 1
+
+  install_ssl_files_into_nginx "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem" || return 1
 }
 
 install_lego_certificate_files() {
@@ -1653,31 +2425,41 @@ install_lego_certificate_files() {
   local issuer_file="${LEGO_STATE_DIR}/certificates/${cert_name}.issuer.crt"
   local key_file="${LEGO_STATE_DIR}/certificates/${cert_name}.key"
 
-  [[ -f "$cert_file" ]] || fail "lego certificate file not found: ${cert_file}"
-  [[ -f "$key_file" ]] || fail "lego private key file not found: ${key_file}"
+  if [[ ! -f "$cert_file" ]]; then
+    warn "lego certificate file not found: ${cert_file}"
+    return 1
+  fi
+  if [[ ! -f "$key_file" ]]; then
+    warn "lego private key file not found: ${key_file}"
+    return 1
+  fi
 
-  run_silent run_as_root mkdir -p "$CERT_INSTALL_DIR"
+  run_silent run_as_root mkdir -p "$CERT_INSTALL_DIR" || return 1
   run_silent run_as_root env CERT_FILE="$cert_file" ISSUER_FILE="$issuer_file" FULLCHAIN_FILE="$CERT_INSTALL_DIR/fullchain.pem" bash -lc '
     cat "$CERT_FILE" > "$FULLCHAIN_FILE"
     if [[ -f "$ISSUER_FILE" ]]; then
       cat "$ISSUER_FILE" >> "$FULLCHAIN_FILE"
     fi
   ' || {
-    fail "Unable to assemble fullchain.pem from lego certificate files."
+    warn "Unable to assemble fullchain.pem from lego certificate files."
+    return 1
   }
-  run_silent run_as_root cp -Lf "$key_file" "$CERT_INSTALL_DIR/privkey.pem"
-  run_silent run_as_root chmod 644 "$CERT_INSTALL_DIR/fullchain.pem"
-  run_silent run_as_root chmod 600 "$CERT_INSTALL_DIR/privkey.pem"
+  run_silent run_as_root cp -Lf "$key_file" "$CERT_INSTALL_DIR/privkey.pem" || return 1
+  run_silent run_as_root chmod 644 "$CERT_INSTALL_DIR/fullchain.pem" || return 1
+  run_silent run_as_root chmod 600 "$CERT_INSTALL_DIR/privkey.pem" || return 1
 
-  install_ssl_files_into_nginx "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem"
+  install_ssl_files_into_nginx "$CERT_INSTALL_DIR/fullchain.pem" "$CERT_INSTALL_DIR/privkey.pem" || return 1
 }
 
 configure_lego_ip_ssl() {
-  [[ -n "$CERTBOT_IP_ADDRESS" ]] || fail "Missing public IP address for Certbot IP certificate setup."
+  if [[ -z "$CERTBOT_IP_ADDRESS" ]]; then
+    warn "Missing public IP address for Certbot IP certificate setup."
+    return 1
+  fi
 
-  ensure_lego_installed
-  run_silent run_as_root mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"
-  run_silent run_as_root mkdir -p "$LEGO_STATE_DIR"
+  ensure_lego_installed || return 1
+  run_silent run_as_root mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge" || return 1
+  run_silent run_as_root mkdir -p "$LEGO_STATE_DIR" || return 1
 
   log "Requesting 6-day IP certificate for ${CERTBOT_IP_ADDRESS} with lego..."
   run_logged_quiet run_as_root "$LEGO_BIN" \
@@ -1694,15 +2476,18 @@ configure_lego_ip_ssl() {
       return 1
     }
 
-  install_lego_certificate_files "$CERTBOT_IP_ADDRESS"
-  configure_lego_renewal_timer
+  install_lego_certificate_files "$CERTBOT_IP_ADDRESS" || return 1
+  configure_lego_renewal_timer || return 1
   log "Nginx SSL configured for IP ${CERTBOT_IP_ADDRESS}."
 }
 
 configure_lego_renewal_timer() {
-  [[ -x "$LEGO_BIN" ]] || fail "lego binary not found at ${LEGO_BIN}."
+  if [[ ! -x "$LEGO_BIN" ]]; then
+    warn "lego binary not found at ${LEGO_BIN}."
+    return 1
+  fi
   log "Creating lego renewal service at ${LEGO_RENEW_SERVICE_FILE}..."
-  run_silent run_as_root tee "$LEGO_RENEW_SERVICE_FILE" >/dev/null <<EOF
+  if ! run_silent run_as_root tee "$LEGO_RENEW_SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=Renew Songbird IP certificate with lego
 After=network-online.target nginx.service
@@ -1718,9 +2503,12 @@ ExecStartPost=/bin/bash -lc 'cat "${LEGO_STATE_DIR}/certificates/${CERTBOT_IP_AD
 [Install]
 WantedBy=multi-user.target
 EOF
+  then
+    return 1
+  fi
 
   log "Creating lego renewal timer at ${LEGO_RENEW_TIMER_FILE}..."
-  run_silent run_as_root tee "$LEGO_RENEW_TIMER_FILE" >/dev/null <<EOF
+  if ! run_silent run_as_root tee "$LEGO_RENEW_TIMER_FILE" >/dev/null <<EOF
 [Unit]
 Description=Run Songbird lego renewal twice daily
 
@@ -1733,9 +2521,12 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
+  then
+    return 1
+  fi
 
-  run_as_root systemctl daemon-reload
-  run_as_root systemctl enable --now songbird-lego-renew.timer
+  run_as_root systemctl daemon-reload || return 1
+  run_as_root systemctl enable --now songbird-lego-renew.timer || return 1
 }
 
 configure_ssl_if_needed() {
@@ -1746,66 +2537,65 @@ configure_ssl_if_needed() {
       ;;
     files)
       log "Installing TLS certificate files into nginx..."
-      configure_manual_ssl_files
+      configure_manual_ssl_files || return 1
       return 0
       ;;
   esac
 
   if [[ "$DEPLOY_MODE" == "ip" ]]; then
-    configure_lego_ip_ssl
+    configure_lego_ip_ssl || return 1
     return 0
   fi
 
-  local existing_certs
-  existing_certs="$(run_as_root certbot certificates 2>/dev/null)"
+  local domain_group_csv=""
+  for domain_group_csv in "${DOMAIN_GROUPS[@]}"; do
+    local cert_name
+    cert_name="$(group_primary_domain "$domain_group_csv")"
+    local group_names=()
+    local domain_entry=""
+    IFS=',' read -r -a group_names <<< "$domain_group_csv"
 
-  local uncovered=()
-  local d
-  for d in "${DOMAIN_NAMES[@]}"; do
-    local escaped
-    escaped="$(printf '%s' "$d" | sed 's/[.[\*^$]/\\&/g')"
-
-    if echo "$existing_certs" | grep -qP "^\s+Domains:.*\b${escaped}\b"; then
-      log "Domain ${d} already has a certificate. Will reconfigure nginx."
-    else
-      uncovered+=("$d")
+    local group_covered="yes"
+    local cert_details=""
+    cert_details="$(run_as_root certbot certificates --cert-name "$cert_name" 2>/dev/null || true)"
+    if [[ -z "$cert_details" ]]; then
+      group_covered="no"
     fi
-  done
 
-  if (( ${#uncovered[@]} > 0 )); then
-    local certbot_d_args=()
-    for d in "${uncovered[@]}"; do
-      certbot_d_args+=(-d "$d")
+    for domain_entry in "${group_names[@]}"; do
+      local escaped
+      escaped="$(printf '%s' "$domain_entry" | sed 's/[.[\*^$]/\\&/g')"
+      if [[ "$group_covered" == "yes" ]] && ! echo "$cert_details" | grep -qP "^\s+Domains:.*\b${escaped}\b"; then
+        group_covered="no"
+        break
+      fi
     done
 
-    log "Requesting SSL certificate for: ${uncovered[*]}"
+    if [[ "$group_covered" == "yes" ]]; then
+      log "Certificate ${cert_name} already covers: $(group_csv_to_space_list "$domain_group_csv")"
+      continue
+    fi
+
+    local certbot_d_args=()
+    for domain_entry in "${group_names[@]}"; do
+      certbot_d_args+=(-d "$domain_entry")
+    done
+
+    log "Requesting SSL certificate for group: $(group_csv_to_space_list "$domain_group_csv")"
     run_as_root certbot certonly \
       --nginx \
+      --cert-name "$cert_name" \
       --https-port "$CLIENT_PORT" \
       --non-interactive \
       --agree-tos \
       --email "$CERTBOT_EMAIL" \
-      "${certbot_d_args[@]}" || { log "ERROR: Certbot failed for: ${uncovered[*]}"; return 1; }
-
-    log "SSL certificate obtained for: ${uncovered[*]}"
-  else
-    log "All domains already have certificates. Skipping certificate request."
-  fi
-
-  log "Configuring nginx SSL for: ${DOMAIN_NAMES[*]}"
-  local all_d_args=()
-  for d in "${DOMAIN_NAMES[@]}"; do
-    all_d_args+=(-d "$d")
+      "${certbot_d_args[@]}" || { log "ERROR: Certbot failed for group: $(group_csv_to_space_list "$domain_group_csv")"; return 1; }
   done
 
-  run_as_root certbot install \
-    --nginx \
-    --https-port "$CLIENT_PORT" \
-    --non-interactive \
-    --cert-name "${DOMAIN_NAMES[0]}" \
-    "${all_d_args[@]}" || { warn "ERROR: Failed to configure nginx SSL"; return 1; }
-
-  log "Nginx SSL configured for: ${DOMAIN_NAMES[*]}"
+  write_nginx_site_config "ssl" || return 1
+  run_as_root nginx -t || return 1
+  run_as_root systemctl reload nginx || return 1
+  log "Nginx SSL configured for domain groups: ${DOMAIN_GROUPS[*]}"
 }
 
 restore_backup_if_provided() {
@@ -1817,10 +2607,12 @@ restore_backup_if_provided() {
     return 1
   fi
   if ! have_cmd unzip; then
-    fail "unzip is required to restore backups. Install it first and retry."
+    warn "unzip is required to restore backups. Install it first and retry."
+    return 1
   fi
   if [[ ! -d "$INSTALL_DIR/server" ]]; then
-    fail "Server directory not found at ${INSTALL_DIR}/server. Cannot restore backup."
+    warn "Server directory not found at ${INSTALL_DIR}/server. Cannot restore backup."
+    return 1
   fi
 
   log "Restoring data from backup: $DB_BACKUP_PATH"
@@ -1850,7 +2642,8 @@ backup_database() {
   backup_password="$(prompt_secret "Backup password")"
   log "Backing up database before update..."
   if ! run_in_install_dir "npm --prefix server run db:backup -- --password $(printf '%q' "$backup_password")"; then
-    warn "DB backup command failed. Continuing, but verify backups manually."
+    warn "DB backup command failed. Update aborted."
+    return 1
   fi
 }
 
@@ -1881,7 +2674,7 @@ run_migrations() {
     return 0
   fi
   log "Running database migrations..."
-  run_in_install_dir "npm --prefix server run db:migrate"
+  run_in_install_dir "npm --prefix server run db:migrate" || return 1
 }
 
 update_nginx_runtime_values() {
@@ -1910,7 +2703,7 @@ update_nginx_runtime_values() {
 
   if run_as_root nginx -t; then
     run_as_root systemctl reload nginx
-    log "Nginx updated with SERVER_PORT=${SERVER_PORT}, CLIENT_PORT=${CLIENT_PORT}, MAX_UPLOAD=${MAX_UPLOAD}."
+    log "Nginx updated with SERVER_PORT=${SERVER_PORT}, CLIENT_PORT=${CLIENT_PORT}, MAX_UPLOAD_MB=${MAX_UPLOAD_MB}."
     log "Backup saved at ${backup_file}."
     return 0
   fi
@@ -1925,23 +2718,23 @@ rebuild_and_restart_after_settings_change() {
   local needs_nginx="${1:-no}"
   sync_values_from_env
   log "Rebuilding client after settings change..."
-  run_in_install_dir "npm --prefix client run build"
+  run_in_install_dir "npm --prefix client run build" || return 1
 
   log "Restarting Songbird service..."
-  run_as_root systemctl restart songbird.service
+  run_as_root systemctl restart songbird.service || return 1
 
   if [[ "$needs_nginx" == "yes" ]]; then
-    log "Updating Nginx config for SERVER_PORT/CLIENT_PORT/MAX_UPLOAD changes..."
-    update_nginx_runtime_values || warn "Nginx update failed. Review ${NGINX_SITE_FILE}."
+    log "Updating Nginx config for SERVER_PORT/CLIENT_PORT/MAX_UPLOAD_MB changes..."
+    update_nginx_runtime_values || return 1
   else
-    log "Nginx update not required (SERVER_PORT/CLIENT_PORT/MAX_UPLOAD unchanged)."
+    log "Nginx update not required (SERVER_PORT/CLIENT_PORT/MAX_UPLOAD_MB unchanged)."
   fi
 }
 
 update_songbird() {
   if [[ -d "$INSTALL_DIR" ]]; then
     if [[ "$(prompt_yes_no "Create a database backup before updating?" "no")" == "yes" ]]; then
-      backup_database
+      backup_database || return 1
     else
       log "Skipping pre-update backup."
     fi
@@ -1958,7 +2751,7 @@ update_songbird() {
 
     local offline_zip_path="$SOURCE_ZIP_PATH"
     local extract_result=""
-    extract_result="$(extract_offline_source_zip "$offline_zip_path" "update")"
+    extract_result="$(extract_offline_source_zip "$offline_zip_path" "update")" || return 1
     local tmp_dir="${extract_result%%|*}"
     local source_root="${extract_result#*|}"
 
@@ -1973,22 +2766,27 @@ update_songbird() {
 
     log "Offline update available. Preparing to update Songbird..."
     preserve_backup_and_restore_data
-    update_source_from_zip "$offline_zip_path"
+    update_source_from_zip "$offline_zip_path" || return 1
 
     log "Installing dependencies..."
-    install_songbird_dependencies
-    ensure_vapid_keys
+    install_songbird_dependencies || return 1
+    ensure_vapid_keys || return 1
 
     log "Synchronizing database schema with latest version..."
-    run_migrations
+    run_migrations || return 1
 
-    apply_ownership
+    apply_ownership || return 1
+    if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then
+      log "Global command synchronized from updated install script."
+    else
+      warn "Failed to synchronize global command after update."
+    fi
 
     log "Restarting Songbird service..."
-    run_as_root systemctl restart songbird.service
-    run_as_root systemctl reload nginx
+    run_as_root systemctl restart songbird.service || return 1
+    run_as_root systemctl reload nginx || return 1
 
-    log "Update completed successfully."
+    show_deployment_success_frame "update"
     press_enter_to_continue
     return 0
   fi
@@ -2045,26 +2843,31 @@ update_songbird() {
   fi
 
   log "Installing dependencies..."
-  install_songbird_dependencies
-  ensure_vapid_keys
+  install_songbird_dependencies || return 1
+  ensure_vapid_keys || return 1
   
   log "Synchronizing database schema with latest version..."
-  run_migrations
+  run_migrations || return 1
 
-  apply_ownership
+  apply_ownership || return 1
+  if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then
+    log "Global command synchronized from updated install script."
+  else
+    warn "Failed to synchronize global command after update."
+  fi
 
   log "Restarting Songbird service..."
-  run_as_root systemctl restart songbird.service
-  run_as_root systemctl reload nginx
+  run_as_root systemctl restart songbird.service || return 1
+  run_as_root systemctl reload nginx || return 1
 
-  log "Update completed successfully."
+  show_deployment_success_frame "update"
   press_enter_to_continue
 }
 
 restart_songbird() {
   log "Restarting Songbird service..."
-  run_as_root systemctl restart songbird.service
-  run_as_root systemctl reload nginx
+  run_as_root systemctl restart songbird.service || return 1
+  run_as_root systemctl reload nginx || return 1
 
   log "Songbird restarted successfully."
   press_enter_to_continue
@@ -2092,7 +2895,7 @@ edit_settings() {
   local before_server before_client before_max
   before_server="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   before_client="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
-  before_max="$(get_existing_env_value "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD")"
+  before_max="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
 
   local before after
   before="$(sha256sum "$env_file" | awk '{print $1}')"
@@ -2109,7 +2912,7 @@ edit_settings() {
   local after_server after_client after_max
   after_server="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
   after_client="$(get_existing_env_value "CLIENT_PORT" "$DEFAULT_CLIENT_PORT")"
-  after_max="$(get_existing_env_value "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD")"
+  after_max="$(get_existing_env_mb_value_with_fallback "FILE_UPLOAD_MAX_TOTAL_SIZE_MB" "FILE_UPLOAD_MAX_TOTAL_SIZE" "$DEFAULT_MAX_UPLOAD_MB")"
 
   local needs_nginx="no"
   if [[ "$before_server" != "$after_server" || "$before_client" != "$after_client" || "$before_max" != "$after_max" ]]; then
@@ -2159,9 +2962,9 @@ remove_songbird() {
 
   log "Songbird removed."
 
-  if [[ -f "/usr/local/bin/songbird-deploy" ]]; then
+  if [[ -f "$GLOBAL_COMMAND_PATH" ]]; then
     if [[ "$(prompt_yes_no "Remove global command (songbird-deploy) as well?" "no")" == "yes" ]]; then
-      run_as_root rm -f "/usr/local/bin/songbird-deploy"
+      run_as_root rm -f "$GLOBAL_COMMAND_PATH"
       log "Global command removed."
     fi
   fi
@@ -2173,9 +2976,9 @@ install_songbird() {
   prompt_source_mode
   collect_install_options
   prompt_install_backup_restore
-  install_required_packages
-  ensure_nodejs_from_nodesource
-  ensure_service_user_exists
+  install_required_packages || return 1
+  ensure_nodejs_from_nodesource || return 1
+  ensure_service_user_exists || return 1
   if [[ "$SOURCE_MODE" == "offline" ]]; then
     ensure_offline_source_ready "install" || return 0
     install_source_from_zip "$SOURCE_ZIP_PATH" || return 1
@@ -2186,8 +2989,8 @@ install_songbird() {
       return 1
     }
   fi
-  ensure_log_dir
-  write_full_env_with_defaults
+  ensure_log_dir || return 1
+  write_full_env_with_defaults || return 1
   RESTORE_BACKUP_QUIET="yes"
   if ! restore_backup_if_provided; then
     RESTORE_BACKUP_QUIET="no"
@@ -2196,88 +2999,130 @@ install_songbird() {
     return 1
   fi
   RESTORE_BACKUP_QUIET="no"
-  install_songbird_dependencies
-  ensure_vapid_keys
-  apply_ownership
-  configure_systemd_service
+  install_songbird_dependencies || return 1
+  ensure_vapid_keys || return 1
+  apply_ownership || return 1
+  configure_systemd_service || return 1
   log "Starting nginx setup..."
-  configure_nginx
+  configure_nginx || return 1
   log "Starting TLS setup..."
-  configure_ssl_if_needed
+  configure_ssl_if_needed || return 1
 
-  log "Installation complete."
-  log "Songbird has been installed successfully."
-  if [[ "$CERT_MODE" == "http" ]]; then
-    if [[ "$DEPLOY_MODE" == "domain" ]]; then
-      for d in "${DOMAIN_NAMES[@]}"; do
-        log "Visit: http://${d}:${CLIENT_PORT}"
-      done
-    else
-      log "Visit: http://<your-server-ip>:${CLIENT_PORT}"
-    fi
-  elif [[ "$DEPLOY_MODE" == "domain" ]]; then
-    for d in "${DOMAIN_NAMES[@]}"; do
-      if [[ "$CLIENT_PORT" == "443" ]]; then
-        log "Visit: https://${d}"
-      else
-        log "Visit: https://${d}:${CLIENT_PORT}"
-      fi
-    done
+  if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then
+    log "Global command synchronized to script version ${LAST_GLOBAL_COMMAND_VERSION:-$SCRIPT_VERSION}."
   else
-    local visit_ip="${CERTBOT_IP_ADDRESS:-<your-server-ip>}"
-    if [[ "$CERT_MODE" == "files" ]]; then
-      visit_ip="<your-server-ip>"
-    fi
-    if [[ "$CLIENT_PORT" == "443" ]]; then
-      log "Visit: https://${visit_ip}"
-    else
-      log "Visit: https://${visit_ip}:${CLIENT_PORT}"
-    fi
+    warn "Failed to synchronize global command after install. You can retry from the menu."
   fi
+  show_deployment_success_frame "install"
 
   press_enter_to_continue
 }
 
+install_global_command_from_path() {
+  local source_path="$1"
+  [[ -n "$source_path" && -f "$source_path" ]] || return 1
+  local install_version=""
+  install_version="$(resolve_script_version_for_path "$source_path" 2>/dev/null || printf "%s" "$SCRIPT_VERSION")"
+
+  local temp_target=""
+  temp_target="$(mktemp)"
+  cp "$source_path" "$temp_target" || {
+    rm -f "$temp_target"
+    return 1
+  }
+
+  if ! sed -i "1s|^# songbird-deploy-version:.*$|# songbird-deploy-version: ${install_version}|" "$temp_target"; then
+    rm -f "$temp_target"
+    return 1
+  fi
+
+  if ! run_silent run_as_root install -m 755 "$temp_target" "$GLOBAL_COMMAND_PATH"; then
+    rm -f "$temp_target"
+    return 1
+  fi
+
+  rm -f "$temp_target"
+  LAST_GLOBAL_COMMAND_VERSION="$install_version"
+  return 0
+}
+
+install_global_command_from_remote() {
+  local install_version="$SCRIPT_VERSION"
+  local temp_target=""
+  temp_target="$(mktemp)"
+  if ! curl -fsSL "$SCRIPT_REMOTE_URL" > "$temp_target"; then
+    rm -f "$temp_target"
+    return 1
+  fi
+  if ! sed -i "1s|^# songbird-deploy-version:.*$|# songbird-deploy-version: ${install_version}|" "$temp_target"; then
+    rm -f "$temp_target"
+    return 1
+  fi
+  if ! run_silent run_as_root install -m 755 "$temp_target" "$GLOBAL_COMMAND_PATH"; then
+    rm -f "$temp_target"
+    return 1
+  fi
+  rm -f "$temp_target"
+  LAST_GLOBAL_COMMAND_VERSION="$install_version"
+  return 0
+}
+
+install_global_command_core() {
+  local source_path="${1:-$CURRENT_SCRIPT_PATH}"
+  if [[ -n "$source_path" && -f "$source_path" ]]; then
+    install_global_command_from_path "$source_path"
+    return $?
+  fi
+
+  log "Script source path is not a regular file. Installing global command from remote..."
+  install_global_command_from_remote
+}
+
 install_global_command() {
-  local target="/usr/local/bin/songbird-deploy"
-  local source_hint="${BASH_SOURCE[0]:-}"
-  local source_path=""
-
-  if [[ -n "$source_hint" ]]; then
-    if [[ "$source_hint" != /* ]]; then
-      source_hint="$(pwd)/$source_hint"
-    fi
-    if [[ -f "$source_hint" ]]; then
-      source_path="$source_hint"
-    fi
+  if ! install_global_command_core "${1:-$CURRENT_SCRIPT_PATH}"; then
+    warn "Failed to install global command."
+    press_enter_to_continue
+    return 1
   fi
 
-  if [[ -n "$source_path" ]]; then
-    run_silent run_as_root install -m 755 "$source_path" "$target"
-  else
-    log "Script source path is not a regular file. Installing global command..."
-    if [[ -n "$SUDO" ]]; then
-      curl -fsSL "$SCRIPT_REMOTE_URL" | $SUDO tee "$target" >/dev/null
-      $SUDO chmod 755 "$target"
-    else
-      curl -fsSL "$SCRIPT_REMOTE_URL" > "$target"
-      chmod 755 "$target"
-    fi
-  fi
-
-  log "Global command installed: songbird-deploy"
+  log "Global command installed: songbird-deploy (version ${LAST_GLOBAL_COMMAND_VERSION:-$SCRIPT_VERSION})"
   log "Run it from anywhere with: songbird-deploy"
   press_enter_to_continue
 }
 
+installed_global_command_version() {
+  local version=""
+  version="$(run_as_root bash -lc "if [[ -f '$GLOBAL_COMMAND_PATH' ]]; then grep -E '^# songbird-deploy-version:' '$GLOBAL_COMMAND_PATH' | head -n 1 | cut -d ':' -f 2- | xargs; fi" 2>/dev/null || true)"
+  if [[ -z "$version" || "$version" == "auto" ]]; then
+    return 1
+  fi
+  printf "%s" "$version"
+}
+
 ensure_global_command_on_first_run() {
-  local target="/usr/local/bin/songbird-deploy"
-  if run_as_root test -x "$target"; then
+  local installed_version=""
+  if ! run_as_root test -x "$GLOBAL_COMMAND_PATH"; then
+    log "Global command not found. Installing it automatically..."
+    if ! install_global_command_core "$CURRENT_SCRIPT_PATH"; then
+      warn "Automatic global command installation failed. You can retry from the menu."
+    fi
     return 0
   fi
-  log "Global command not found. Installing it automatically..."
-  if ! install_global_command; then
-    warn "Automatic global command installation failed. You can retry from the menu."
+
+  installed_version="$(installed_global_command_version 2>/dev/null || true)"
+  if [[ -z "$installed_version" ]]; then
+    log "Global command version could not be determined. Reinstalling it automatically..."
+    if ! install_global_command_core "$CURRENT_SCRIPT_PATH"; then
+      warn "Automatic global command reinstall failed. You can retry from the menu."
+    fi
+    return 0
+  fi
+
+  if dpkg --compare-versions "$installed_version" lt "$SCRIPT_VERSION"; then
+    log "Global command version ${installed_version} is older than script version ${SCRIPT_VERSION}. Updating it automatically..."
+    if ! install_global_command_core "$CURRENT_SCRIPT_PATH"; then
+      warn "Automatic global command update failed. You can retry from the menu."
+    fi
   fi
 }
 
@@ -2331,7 +3176,7 @@ show_nginx_error_logs() {
 
 
 show_banner() {
-  printf '\033[1;36m'   # bold cyan
+  printf '\033[1;38;2;42;186;130m'   # bold Songbird green (#2ABA82)
   cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║                                                                           ║
@@ -2345,6 +3190,7 @@ show_banner() {
 ║                           D E P L O Y   T O O L                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 EOF
+  printf 'Script Version: %s\n' "$SCRIPT_VERSION"
   printf '\033[0m'      # reset
 }
 
@@ -2360,10 +3206,10 @@ show_menu() {
   printf $'4) ⚙️  Edit Settings (.env)\n'
   printf $'5) 🗃️  Manage Database\n'
   printf $'6) 🗑️  Remove Songbird\n'
-  printf $'7) 🔄️  Reinstall global command (songbird-deploy)\n'
+  printf $'7) 🔄️  Reinstall songbird-deploy\n'
   printf $'8) 🌐  Configure mirrors\n'
   printf $'9) 📋  View Logs\n'
-  printf $'10) 🚪  Exit\n\n'
+  printf $'0) 🚪  Exit\n\n'
 }
 
 show_logs_menu() {
@@ -2376,15 +3222,17 @@ show_logs_menu() {
     printf $'2) 📋  View service logs\n'
     printf $'3) 📋 View nginx access logs\n'
     printf $'4) 📋  View nginx error logs\n'
-    printf $'5) ↩️  Go back\n\n'
+    printf $'5) ↩️  Go back\n'
+    printf $'0) 🚪  Exit\n\n'
 
-    prompt_read "Choose an option [1-5]: " choice
+    prompt_read "Choose an option [0-5]: " choice
     case "$choice" in
       1) show_logs ;;
       2) show_service_logs ;;
       3) show_nginx_access_logs ;;
       4) show_nginx_error_logs ;;
       5) return ;;
+      0) exit 0 ;;
       *) printf "Invalid choice. Select a number from 1 to 5.\n" ;;
     esac
   done
@@ -2394,27 +3242,66 @@ run_db_command() {
   local args=("$@")
   local escaped=""
   local part=""
+  local path_prefix=""
+  local path_export=""
+  if [[ "${args[0]:-}" == "npm" ]]; then
+    resolve_npm_exec_path || return 1
+    args[0]="$NPM_EXEC_PATH"
+  fi
+  path_prefix="$(node_tools_path_prefix)"
+  if [[ -n "$path_prefix" ]]; then
+    path_export="export PATH=$(printf '%q' "$path_prefix"):\$PATH; "
+  fi
   for part in "${args[@]}"; do
     escaped+=" $(printf '%q' "$part")"
   done
-  run_as_root bash -lc "cd '$INSTALL_DIR' && ${escaped:1}"
+  run_as_root bash -lc "cd '$INSTALL_DIR' && ${path_export}${escaped:1} </dev/null"
 }
 
 run_db_command_logged_quiet() {
   local args=("$@")
   local escaped=""
   local part=""
+  local path_prefix=""
+  local path_export=""
+  if [[ "${args[0]:-}" == "npm" ]]; then
+    resolve_npm_exec_path || return 1
+    args[0]="$NPM_EXEC_PATH"
+  fi
+  path_prefix="$(node_tools_path_prefix)"
+  if [[ -n "$path_prefix" ]]; then
+    path_export="export PATH=$(printf '%q' "$path_prefix"):\$PATH; "
+  fi
   for part in "${args[@]}"; do
     escaped+=" $(printf '%q' "$part")"
   done
-  run_logged_quiet run_as_root bash -lc "cd '$INSTALL_DIR' && ${escaped:1}"
+  run_logged_quiet run_as_root bash -lc "cd '$INSTALL_DIR' && ${path_export}${escaped:1} </dev/null"
+}
+
+split_db_selector_input() {
+  local input="$1"
+  local __result_var="$2"
+
+  if [[ ! "$__result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+
+  input="$(printf "%s" "$input" | tr ',' ' ')"
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  read -r -a "$__result_var" <<< "$input"
 }
 
 resolve_chat_visibility_for_script() {
   local chat_selector="$1"
   [[ -n "$chat_selector" ]] || return 1
+  local path_prefix=""
+  path_prefix="$(node_tools_path_prefix)"
 
-  run_as_root env INSTALL_DIR="$INSTALL_DIR" CHAT_SELECTOR="$chat_selector" bash -lc '
+  run_as_root env INSTALL_DIR="$INSTALL_DIR" CHAT_SELECTOR="$chat_selector" NODE_TOOLS_PATH_PREFIX="$path_prefix" bash -lc '
+    if [[ -n "$NODE_TOOLS_PATH_PREFIX" ]]; then
+      export PATH="$NODE_TOOLS_PATH_PREFIX:$PATH"
+    fi
     cd "$INSTALL_DIR" || exit 1
     node --input-type=module -e "
       import { pathToFileURL } from \"node:url\";
@@ -2439,20 +3326,68 @@ print_db_script_help() {
   cat <<'EOF'
 Songbird Script Database Menu
 
-Use these menu actions inside this installer script:
+The installer collects every required value before running DB commands, then
+passes those values as CLI flags/arguments with stdin closed so the nested
+command cannot ask hidden follow-up questions.
+
+Inspect:
   1-4   Inspect database/chats/users/files
+        Prompts: row limit
+        Passes: --limit
+
+Backup & repair:
   5     Backup database and uploads
-  6     Restore a backup zip
-  7     Vacuum the database
-  8-13  Reset/delete/ban file+chat+user data
-  14    Create one user
-  15    Generate users in bulk
-  16    Create a group or channel
-  17    Add members to a chat
-  18    Edit a chat
-  19    Edit a user
+        Prompts: backup password
+        Passes: --password
+  6     Restore backup
+        Prompts: backup zip path, restore confirmation, optional password
+        Passes: -y --file [--password]
+  7     Vacuum database
+        Prompts: confirmation
+        Passes: -y
+  8     Reset database
+        Prompts: confirmation, recreate yes/no
+        Passes: -y --recreate or -y --no-recreate
+  9     Delete database
+        Prompts: confirmation
+        Passes: -y
+
+User and chat management:
+  10    Create user
+        Prompts: nickname, username, password
+        Passes: --nickname --username --password
+  11    Generate users in bulk
+        Prompts: count, password, nickname prefix, username prefix
+        Passes: --count --password --nickname-prefix --username-prefix
+  12    Edit user
+        Prompts: user selector and optional profile fields
+        Passes: selector plus any changed --username/--nickname/--avatar-url/--status/--color
+  13    Ban/unban user
+        Prompts: user selector, confirmation
+        Passes: -y selector
+  14    Create group/channel
+        Prompts: type, name, username, visibility, owner, optional members
+        Passes: --type --name --owner --username --visibility --users
+  15    Add members to chat
+        Prompts: chat selector, all-users yes/no, or user selectors
+        Passes: chat selector plus --all or user selectors
+  16    Edit chat
+        Prompts: chat selector and optional profile/settings fields
+        Passes: selector plus any changed --name/--username/--visibility/--color/--owner/invite flag
+
+Destructive actions:
+  17    Delete chats
+        Prompts: chat ids/usernames or "all"
+        Passes: -y selectors or --all -y
+  18    Delete users
+        Prompts: user ids/usernames or "all"
+        Passes: -y selectors or --all -y
+  19    Delete files
+        Prompts: file ids/stored names or "all"
+        Passes: -y selectors or --all -y
 
 Notes:
+  - "all" is explicit for chat/user/file delete actions.
   - "Ban/unban user" is a toggle and expires that user's sessions.
   - Public chats always allow member invites. Invite settings only apply to private chats.
   - Backups are encrypted zip files containing .env and data/.
@@ -2478,6 +3413,7 @@ db_help() {
 db_vacuum() {
   if [[ "$(prompt_yes_no "This will run VACUUM and rewrite the database file. Continue?" "no")" != "yes" ]]; then
     log "VACUUM canceled."
+    press_enter_to_continue
     return 0
   fi
   run_db_command npm --prefix server run db:vacuum -- -y
@@ -2491,6 +3427,7 @@ db_restore() {
   backup_path="$(select_backup_zip_path)"
   if [[ "$(prompt_yes_no "This will replace ${INSTALL_DIR}/data and update ${INSTALL_DIR}/.env when the backup includes it. Continue?" "yes")" != "yes" ]]; then
     log "Restore canceled."
+    press_enter_to_continue
     return 0
   fi
   backup_password="$(prompt_secret_optional "Backup password (leave blank if not encrypted)")"
@@ -2522,6 +3459,7 @@ db_inspect() {
 db_reset() {
   if [[ "$(prompt_yes_no "This will reset database and delete uploads. Continue?" "no")" != "yes" ]]; then
     log "Reset canceled."
+    press_enter_to_continue
     return 0
   fi
   local recreate="yes"
@@ -2540,6 +3478,7 @@ db_reset() {
 db_delete() {
   if [[ "$(prompt_yes_no "This will permanently delete database and uploads. Continue?" "no")" != "yes" ]]; then
     log "Delete canceled."
+    press_enter_to_continue
     return 0
   fi
   run_db_command npm --prefix server run db:delete -- -y
@@ -2548,60 +3487,60 @@ db_delete() {
 
 db_chat_delete() {
   local input=""
-  prompt_read "Enter chat IDs (comma/space separated) or type 'all': " input
-  input="$(printf "%s" "$input" | tr ',' ' ')"
-  input="${input#"${input%%[![:space:]]*}"}"
-  input="${input%"${input##*[![:space:]]}"}"
+  local selectors=()
+  prompt_read "Enter chat IDs or group/channel usernames (comma/space separated), or type 'all': " input
+  split_db_selector_input "$input" selectors
 
-  if [[ -z "$input" ]]; then
+  if [[ "${#selectors[@]}" -eq 0 ]]; then
     printf "No input provided.\n"
+    press_enter_to_continue
     return 0
   fi
 
-  if [[ "${input,,}" == "all" ]]; then
+  if [[ "${#selectors[@]}" -eq 1 && "${selectors[0],,}" == "all" ]]; then
     run_db_command npm --prefix server run db:chat:delete -- --all -y
   else
-    run_db_command npm --prefix server run db:chat:delete -- -y $input
+    run_db_command npm --prefix server run db:chat:delete -- -y "${selectors[@]}"
   fi
   press_enter_to_continue
 }
 
 db_file_delete() {
   local input=""
+  local selectors=()
   prompt_read "Enter file IDs or stored names (comma/space separated) or type 'all': " input
-  input="$(printf "%s" "$input" | tr ',' ' ')"
-  input="${input#"${input%%[![:space:]]*}"}"
-  input="${input%"${input##*[![:space:]]}"}"
+  split_db_selector_input "$input" selectors
 
-  if [[ -z "$input" ]]; then
+  if [[ "${#selectors[@]}" -eq 0 ]]; then
     printf "No input provided.\n"
+    press_enter_to_continue
     return 0
   fi
 
-  if [[ "${input,,}" == "all" ]]; then
-    run_db_command npm --prefix server run db:file:delete -- -y
+  if [[ "${#selectors[@]}" -eq 1 && "${selectors[0],,}" == "all" ]]; then
+    run_db_command npm --prefix server run db:file:delete -- --all -y
   else
-    run_db_command npm --prefix server run db:file:delete -- -y $input
+    run_db_command npm --prefix server run db:file:delete -- -y "${selectors[@]}"
   fi
   press_enter_to_continue
 }
 
 db_user_delete() {
   local input=""
+  local selectors=()
   prompt_read "Enter user IDs or usernames (comma/space separated) or type 'all': " input
-  input="$(printf "%s" "$input" | tr ',' ' ')"
-  input="${input#"${input%%[![:space:]]*}"}"
-  input="${input%"${input##*[![:space:]]}"}"
+  split_db_selector_input "$input" selectors
 
-  if [[ -z "$input" ]]; then
+  if [[ "${#selectors[@]}" -eq 0 ]]; then
     printf "No input provided.\n"
+    press_enter_to_continue
     return 0
   fi
 
-  if [[ "${input,,}" == "all" ]]; then
+  if [[ "${#selectors[@]}" -eq 1 && "${selectors[0],,}" == "all" ]]; then
     run_db_command npm --prefix server run db:user:delete -- --all -y
   else
-    run_db_command npm --prefix server run db:user:delete -- -y $input
+    run_db_command npm --prefix server run db:user:delete -- -y "${selectors[@]}"
   fi
   press_enter_to_continue
 }
@@ -2633,7 +3572,7 @@ db_user_generate() {
   count="${count%"${count##*[![:space:]]}"}"
   [[ -z "$count" ]] && count="10"
 
-  password="$(prompt_secret "Password for generated users? (default: Passw0rd!)")"
+  password="$(prompt_secret_optional "Password for generated users? (default: Passw0rd!)")"
   [[ -z "$password" ]] && password="Passw0rd!"
 
   prompt_read "Nickname prefix (default: User): " nickname_prefix
@@ -2689,6 +3628,7 @@ db_chat_create() {
 db_chat_add() {
   local chat=""
   local users=""
+  local user_selectors=()
   local add_all="no"
 
   chat="$(prompt_non_empty "Chat id or username")"
@@ -2701,8 +3641,13 @@ db_chat_add() {
   fi
 
   users="$(prompt_non_empty "Usernames or ids (comma separated)")"
-  users="$(printf "%s" "$users" | tr ',' ' ')"
-  run_db_command npm --prefix server run db:chat:add -- "$chat" $users
+  split_db_selector_input "$users" user_selectors
+  if [[ "${#user_selectors[@]}" -eq 0 ]]; then
+    printf "No users provided.\n"
+    press_enter_to_continue
+    return 0
+  fi
+  run_db_command npm --prefix server run db:chat:add -- "$chat" "${user_selectors[@]}"
   press_enter_to_continue
 }
 
@@ -2788,6 +3733,7 @@ db_user_ban() {
   user="$(prompt_non_empty "User id or username")"
   if [[ "$(prompt_yes_no "Toggle ban state for ${user} ?" "no")" != "yes" ]]; then
     log "Ban/unban canceled."
+    press_enter_to_continue
     return 0
   fi
   run_db_command npm --prefix server run db:user:ban -- -y "$user"
@@ -2813,30 +3759,48 @@ show_db_menu() {
     clear
     show_banner
     printf "\n"
-    printf "Manage Database\n"
-    printf "1) 👁️  Inspect database (summary)\n"
-    printf "2) 👁️  Inspect chats metadata\n"
-    printf "3) 👁️  Inspect users\n"
-    printf "4) 👁️  Inspect files\n"
-    printf "5) 📤  Backup database\n"
-    printf "6) ♻️  Restore backup\n"
-    printf "7) 🧹  Vacuum database\n"
-    printf "8) 🔄️  Reset database\n"
-    printf "9) 🗑️  Delete database\n"
-    printf "10) 🗑️  Delete chats\n"
-    printf "11) 🗑️  Delete users\n"
-    printf "12) 🚫  Ban/unban user\n"
-    printf "13) 🗑️  Delete files\n"
-    printf "14) 👤  Create user\n"
-    printf "15) 👥  Generate users (bulk)\n"
-    printf "16) 💬  Create group/channel\n"
-    printf "17) ➕  Add members to chat\n"
-    printf "18) ✏️  Edit chat\n"
-    printf "19) ✏️ Edit user\n"
-    printf "20) ❔  Show help\n"
-    printf "21) ↩️  Go back\n\n"
 
-    prompt_read "Choose an option [1-21]: " choice
+    printf "Manage Database\n"
+    printf "┌──── Inspect ────────────────────────────────┐\n"
+    printf "│                                             │\n"
+    printf "│  1) 👁️  Inspect database (summary)           │\n"
+    printf "│  2) 👁️  Inspect chats metadata               │\n"
+    printf "│  3) 👁️  Inspect users                        │\n"
+    printf "│  4) 👁️  Inspect files                        │\n"
+    printf "│                                             │\n"
+    printf "├──── Backup & Repair ────────────────────────┤\n"
+    printf "│                                             │\n"
+    printf "│  5) 📤  Backup database                     │\n"
+    printf "│  6) ♻️  Restore backup                       │\n"
+    printf "│  7) 🧹  Vacuum database                     │\n"
+    printf "│  8) 🔄️  Reset database                      │\n"
+    printf "│  9) 🗑️  Delete database                      │\n"
+    printf "│                                             │\n"
+    printf "├──── User & Chat Management ─────────────────┤\n"
+    printf "│                                             │\n"
+    printf "│  10) 👤  Create user                        │\n"
+    printf "│  11) 👥  Generate users (bulk)              │\n"
+    printf "│  12) ✏️  Edit user                           │\n"
+    printf "│  13) 🚫  Ban/unban user                     │\n"
+    printf "│  14) 💬  Create group/channel               │\n"
+    printf "│  15) ➕  Add members to chat                │\n"
+    printf "│  16) ✏️  Edit chat                           │\n"
+    printf "│                                             │\n"
+    printf "├──── Destructive Actions ────────────────────┤\n"
+    printf "│                                             │\n"
+    printf "│  17) 🗑️  Delete chats                        │\n"
+    printf "│  18) 🗑️  Delete users                        │\n"
+    printf "│  19) 🗑️  Delete files                        │\n"
+    printf "│                                             │\n"
+    printf "├──── Help & Navigation ──────────────────────┤\n"
+    printf "│                                             │\n"
+    printf "│  20) ❔  Show help                          │\n"
+    printf "│  21) ↩️  Go back                             │\n"
+    printf "│  0) 🚪  Exit                                │\n"
+    printf "│                                             │\n"
+    printf "└─────────────────────────────────────────────┘\n\n"
+
+    prompt_read "Choose an option [0-21]: " choice
     case "$choice" in
       1) db_inspect "all" ;;
       2) db_inspect "chat" ;;
@@ -2847,24 +3811,31 @@ show_db_menu() {
       7) db_vacuum ;;
       8) db_reset ;;
       9) db_delete ;;
-      10) db_chat_delete ;;
-      11) db_user_delete ;;
-      12) db_user_ban ;;
-      13) db_file_delete ;;
-      14) db_user_create ;;
-      15) db_user_generate ;;
-      16) db_chat_create ;;
-      17) db_chat_add ;;
-      18) db_chat_edit ;;
-      19) db_user_edit ;;
+      10) db_user_create ;;
+      11) db_user_generate ;;
+      12) db_user_edit ;;
+      13) db_user_ban ;;
+      14) db_chat_create ;;
+      15) db_chat_add ;;
+      16) db_chat_edit ;;
+      17) db_chat_delete ;;
+      18) db_user_delete ;;
+      19) db_file_delete ;;
       20) db_help ;;
       21) return ;;
+      0) exit 0 ;;
       *) printf "Invalid choice. Select a number from 1 to 21.\n" ;;
     esac
   done
 }
 
 main() {
+  if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+    SKIP_CLEAR_ON_EXIT="1"
+    printf "%s\n" "$SCRIPT_VERSION"
+    return 0
+  fi
+
   init_prompt_io
   detect_os
   ensure_sudo
@@ -2876,18 +3847,18 @@ main() {
   local choice=""
   while true; do
     show_menu
-    prompt_read "Choose an option [1-10]: " choice
+    prompt_read "Choose an option [0-9]: " choice
     case "$choice" in
-      1) install_songbird ;;
-      2) update_songbird ;;
-      3) restart_songbird ;;
-      4) edit_settings ;;
-      5) show_db_menu ;;
-      6) remove_songbird ;;
-      7) install_global_command ;;
-      8) configure_mirrors_menu ;;
-      9) show_logs_menu ;;
-      10) break ;;
+      1) run_menu_action install_songbird ;;
+      2) run_menu_action update_songbird ;;
+      3) run_menu_action restart_songbird ;;
+      4) run_menu_action edit_settings ;;
+      5) run_menu_action show_db_menu ;;
+      6) run_menu_action remove_songbird ;;
+      7) run_menu_action install_global_command ;;
+      8) run_menu_action configure_mirrors_menu ;;
+      9) run_menu_action show_logs_menu ;;
+      0) break ;;
       *) printf "Invalid choice. Select a number from 1 to 10.\n" ;;
     esac
   done

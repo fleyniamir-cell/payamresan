@@ -103,6 +103,16 @@ cd /opt/songbird
 git clone https://github.com/bllackbull/Songbird.git .
 ```
 
+اگر برنامه را با SSL اجرا می‌کنید، یک گواهی self-signed داخل پوشه `certs/` بسازید:
+
+```bash
+openssl req -x509 -newkey rsa:2048 \
+  -keyout certs/key.pem \
+  -out certs/cert.pem \
+  -days 365 -nodes \
+  -subj "/CN=localhost"
+```
+
 ### 3. ساخت کانتینر
 
 ```bash
@@ -117,7 +127,9 @@ docker compose -f docker-compose.yaml ps
 docker compose -f docker-compose.yaml logs -f
 ```
 
-برای تکمیل نصب، به بخش [تنظیم Nginx](#تنظیم-nginx) مراجعه کنید.
+> [!IMPORTANT]
+> Docker به‌صورت خودکار کانفیگ Nginx را طوری تنظیم می‌کند که با استفاده از گواهی self-signed که قبلا ساخته‌اید روی پورت ۴۴۳ اجرا شود.  
+> برای تغییر و شخصی‌سازی کانفیگ Nginx، به بخش [تنظیم Nginx](#تنظیم-nginx) مراجعه کنید.
 
 ## نصب دستی
 
@@ -255,7 +267,7 @@ Songbird هم فرانت‌اند build شده و هم API را از طریق س
 > [!IMPORTANT]
 > - مقدار `proxy_pass` را با `SERVER_PORT` هماهنگ نگه دارید.
 > - مقدار `listen` در Nginx را با `CLIENT_PORT` هماهنگ نگه دارید.
-> - مقدار `client_max_body_size` را با `FILE_UPLOAD_MAX_TOTAL_SIZE` هماهنگ نگه دارید.
+> - مقدار `client_max_body_size` را با `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` هماهنگ نگه دارید.
 
 ### فقط HTTP
 
@@ -265,7 +277,7 @@ Songbird هم فرانت‌اند build شده و هم API را از طریق س
 server {
   listen 80 default_server;
   server_name example.com www.example.com;
-  client_max_body_size 78643200;
+  client_max_body_size 75m;
 
   location /api/events {
     proxy_pass http://127.0.0.1:5174;
@@ -315,7 +327,7 @@ server_name _;
 server {
   listen 443 ssl default_server;
   server_name example.com www.example.com;
-  client_max_body_size 78643200;
+  client_max_body_size 75m;
 
   ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
@@ -440,10 +452,10 @@ nano .env
 | `CLIENT_PORT` | `عدد` | `80` | پورتی که Nginx روی آن گوش می‌دهد و کاربر به آن وصل می‌شود. |
 | `APP_ENV` | `رشته` | `production` | حالت اجرای سرور. (`production` پیشنهاد می‌شود.) |
 | `APP_DEBUG` | `بولی` | `false` | فعال‌سازی لاگ‌های دیباگ دقیق سرور در ترمینال. |
-| `ACCOUNT_CREATION` | `بولی` | `true` | اجازه ساخت حساب جدید از طریق وب‌سایت (`/signup`). |
+| `SIGN_UP` | `بولی` | `true` | اجازه ساخت حساب جدید از طریق وب‌سایت (`/signup`). (`ACCOUNT_CREATION` به‌عنوان fallback قدیمی پشتیبانی می‌شود.) |
 | `FILE_UPLOAD` | `بولی` | `true` | فعال یا غیرفعال کردن همه آپلودها (فایل چت و آواتار). |
-| `FILE_UPLOAD_MAX_SIZE` | `عدد` | `26214400` | حداکثر اندازه هر فایل آپلودی به بایت. |
-| `FILE_UPLOAD_MAX_TOTAL_SIZE` | `عدد` | `78643200` | سقف مجموع حجم فایل‌های یک پیام به بایت. |
+| `FILE_UPLOAD_MAX_SIZE_MB` | `عدد` | `25` | حداکثر اندازه هر فایل آپلودی به مگابایت. (`FILE_UPLOAD_MAX_SIZE` به‌عنوان fallback قدیمی برحسب بایت پشتیبانی می‌شود.) |
+| `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` | `عدد` | `75` | سقف مجموع حجم فایل‌های یک پیام به مگابایت. (`FILE_UPLOAD_MAX_TOTAL_SIZE` به‌عنوان fallback قدیمی برحسب بایت پشتیبانی می‌شود.) |
 | `FILE_UPLOAD_MAX_FILES` | `عدد` | `10` | حداکثر تعداد فایل در یک پیام. |
 | `FILE_UPLOAD_TRANSCODE_VIDEOS` | `بولی` | `true` | تبدیل ویدیوهای آپلودشده به MP4 با H.264/AAC. نیازمند `ffmpeg`. |
 | `MESSAGE_FILE_RETENTION` | `عدد` | `7` | حذف خودکار فایل‌های پیام بعد از N روز. (`0` یعنی غیرفعال) |
@@ -462,10 +474,10 @@ nano .env
 | `CHAT_HEALTH_CHECK_INTERVAL` | `عدد` | `10000` | فاصله health check اتصال. (میلی‌ثانیه) |
 | `CHAT_SSE_RECONNECT_DELAY` | `عدد` | `2000` | تاخیر قبل از اتصال دوباره SSE بعد از خطا. (میلی‌ثانیه) |
 | `CHAT_SEARCH_MAX_RESULTS` | `عدد` | `5` | حداکثر تعداد کاربر در نتایج جستجو. |
-| `CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES` | `عدد` | `5242880` | حداکثر حجم فایل صوتی مجاز برای decode waveform در کلاینت. |
+| `CHAT_VOICE_WAVEFORM_MAX_DECODE_MB` | `عدد` | `5` | حداکثر حجم فایل صوتی مجاز برای decode waveform در کلاینت به مگابایت. (`CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES` به‌عنوان fallback قدیمی برحسب بایت پشتیبانی می‌شود.) |
 | `CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS` | `عدد` | `480` | حداکثر طول فایل صوتی مجاز برای decode waveform در کلاینت. |
-| `NICKNAME_MAX` | `عدد` | `24` | حداکثر طول nickname برای کاربران و گروه‌ها. |
-| `USERNAME_MAX` | `عدد` | `16` | حداکثر طول username برای کاربران و گروه‌ها. |
+| `NICKNAME_MAX_CHARS` | `عدد` | `24` | حداکثر طول nickname برای کاربران و گروه‌ها. (`NICKNAME_MAX` به‌عنوان fallback قدیمی پشتیبانی می‌شود.) |
+| `USERNAME_MAX_CHARS` | `عدد` | `16` | حداکثر طول username برای کاربران و گروه‌ها. (`USERNAME_MAX` به‌عنوان fallback قدیمی پشتیبانی می‌شود.) |
 | `STORAGE_ENCRYPTION_KEY` | `رشته` | خودکار تولید می‌شود | کلید ثابت برای رمزنگاری داده‌های ذخیره‌شده. تغییر این مقدار بدون رمزگشایی داده‌های قبلی باعث غیرقابل‌خواندن شدن آن‌ها می‌شود. |
 | `VAPID_PUBLIC_KEY` | `رشته` | خودکار تولید می‌شود | کلید عمومی Web Push. |
 | `VAPID_PRIVATE_KEY` | `رشته` | خودکار تولید می‌شود | کلید خصوصی Web Push. |
@@ -475,7 +487,7 @@ nano .env
 > **Push notification به HTTPS نیاز دارد**، به جز `localhost` در حالت توسعه. در iOS هم نیاز به PWA نصب‌شده دارید. (`iOS 16.4+`)
 
 > [!IMPORTANT]
-> **رمزنگاری در حالت ذخیره:** Songbird در اولین اجرا مقدار `STORAGE_ENCRYPTION_KEY` را به‌صورت خودکار تولید می‌کند و در `.env` ذخیره می‌کند. این مقدار باید ثابت بماند. در زمان startup، سرور پیام‌ها و فایل‌های قبلی را در صورت نیاز به‌صورت رمزنگاری‌شده backfill می‌کند.
+> **رمزنگاری در حالت ذخیره:** Songbird در اولین اجرا مقدار `STORAGE_ENCRYPTION_KEY` را به‌صورت خودکار تولید می‌کند و در `.env` ذخیره می‌کند. این مقدار باید ثابت بماند. در زمان startup، سرور پیام‌ها، فایل‌ها و avatarهای قبلی را در صورت نیاز به‌صورت رمزنگاری‌شده backfill می‌کند.
 
 ### اعمال تغییرات
 
@@ -576,7 +588,7 @@ sudo systemctl reload nginx
 - اضافه کردن کاربر به گروه یا کانال: `npm run db:chat:add`
 - ویرایش گروه یا کانال یا انتقال مالکیت: `npm run db:chat:edit`
 - حذف چت‌ها: `npm run db:chat:delete`
-- حذف فایل‌ها: `npm run db:file:delete`
+- حذف فایل‌ها: `npm run db:file:delete` (برای حذف همه نیاز به `--all` دارد)
 - ویرایش کاربر: `npm run db:user:edit`
 - بن یا آنبن کاربر: `npm run db:user:ban`
 - حذف کاربران: `npm run db:user:delete`
@@ -609,7 +621,7 @@ npm run db:reset -y
 npm run db:delete --yes
 npm run db:chat:delete 12 -y
 npm run db:chat:delete -- --all -y
-npm run db:file:delete -y
+npm run db:file:delete -- --all -y
 npm run db:file:delete 42 -y
 npm run db:file:delete FILE_NAME -y
 npm run db:user:delete songbird.sage -y
@@ -762,6 +774,30 @@ docker compose exec songbird npm --prefix /app/server run db:inspect
 <a href="https://nowpayments.io/donation?api_key=0b61dd3e-6508-4849-ad92-1dde65442937" target="_blank" rel="noreferrer noopener">
     <img src="https://nowpayments.io/images/embeds/donation-button-black.svg" alt="Crypto donation button by NOWPayments">
 </a>
+
+### TRX:
+
+```
+TPf1bEhipKpGkjo5N2Scj9nufNNh5TNrwX
+```
+
+### USDT (TRC20):
+
+```
+0x63313383611BbE11f4fEc139c14ad0b70281b822
+```
+
+### BTC:
+
+```
+bc1q9hupvcc39juhf0k7rgzn6phn8s8jez365kzmuj
+```
+
+### TON:
+
+```
+UQDzQ3xbWzKQvw8X8sWU82dksBeYqTHrT9sLzhBOyaESPjVy
+```
 
 ## لایسنس
 

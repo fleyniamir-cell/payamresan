@@ -12,14 +12,27 @@ const clampEnvInt = (value, fallback, { min, max } = {}) => {
   if (max !== undefined && intValue > max) return fallback;
   return intValue;
 };
-const USERNAME_MAX = clampEnvInt(process.env.USERNAME_MAX, 16, {
-  min: 3,
-  max: 32,
-});
-const NICKNAME_MAX = clampEnvInt(process.env.NICKNAME_MAX, 24, {
-  min: 3,
-  max: 64,
-});
+const readEnvValue = (...keys) =>
+  keys
+    .map((key) => process.env[key])
+    .find((value) => value !== undefined && value !== null && value !== "");
+
+const USERNAME_MAX = clampEnvInt(
+  readEnvValue("USERNAME_MAX_CHARS", "USERNAME_MAX"),
+  16,
+  {
+    min: 3,
+    max: 32,
+  },
+);
+const NICKNAME_MAX = clampEnvInt(
+  readEnvValue("NICKNAME_MAX_CHARS", "NICKNAME_MAX"),
+  24,
+  {
+    min: 3,
+    max: 64,
+  },
+);
 
 async function main() {
   const args = getCliArgs();

@@ -349,6 +349,9 @@ export function useMessagesLoader({
         const prevLocalCandidates = basePrev.filter((msg) =>
           Boolean(msg?._clientId),
         );
+        const prevLocalByClientId = new Map(
+          prevLocalCandidates.map((msg) => [String(msg?._clientId || "").trim(), msg]),
+        );
         const nextMessagesByClientRequestId = new Map(
           nextMessagesWithReplyIcons
             .map((msg) => [String(msg?.client_request_id || "").trim(), msg])
@@ -367,6 +370,14 @@ export function useMessagesLoader({
                     String(localMsg?._clientId || "").trim() ===
                     serverClientRequestId,
                 ) || null;
+            }
+            if (!existingLocal) {
+              const serverClientId = String(
+                serverMsg?.clientRequestId || serverMsg?.client_request_id || "",
+              ).trim();
+              if (serverClientId) {
+                existingLocal = prevLocalByClientId.get(serverClientId);
+              }
             }
             if (!existingLocal) {
               existingLocal = prevLocalCandidates.find((localMsg) => {
@@ -433,6 +444,10 @@ export function useMessagesLoader({
               _delivery: undefined,
               _awaitingServerEcho: false,
               _visibilityTime: existingLocal?._visibilityTime,
+              _readByMe:
+                Boolean(serverMsg?.read_by_me) ||
+                Boolean(existingLocal?._readByMe) ||
+                Number(serverMsg?.user_id || 0) === Number(user.id),
               read_at: serverMsg.read_at || existingLocal?.read_at || null,
               read_by_user_id:
                 serverMsg.read_by_user_id || existingLocal?.read_by_user_id || null,
@@ -494,7 +509,9 @@ export function useMessagesLoader({
             pendingClientRequestId &&
             serverMessages.some(
               (serverMsg) =>
-                String(serverMsg?.client_request_id || "").trim() ===
+                String(
+                  serverMsg?.clientRequestId || serverMsg?.client_request_id || "",
+                ).trim() ===
                 pendingClientRequestId,
             )
           ) {

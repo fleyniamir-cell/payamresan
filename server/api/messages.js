@@ -73,6 +73,14 @@ function registerMessageRoutes(app, deps) {
     ).toISOString();
   };
 
+  const canUserPostInChat = (chatId, userId, chat = null) => {
+    const resolvedChat = chat || findChatById(Number(chatId));
+    if (!resolvedChat) return false;
+    if (resolvedChat.type !== "channel") return true;
+    const role = String(getChatMemberRole(Number(chatId), Number(userId))).toLowerCase();
+    return role === "owner";
+  };
+
   const normalizeForwardOriginAvatarUrl = (userId, avatarUrl) => {
     const normalized = ensureAvatarExists(userId, avatarUrl);
     return String(normalized || "").trim() || null;
@@ -84,7 +92,6 @@ function registerMessageRoutes(app, deps) {
         String(sourceChat?.name || "").trim() ||
         String(sourceChat?.group_username || "").trim() ||
         "Channel";
-
       return {
         sourceChatId: Number(sourceChat?.id || 0) || null,
         label,
@@ -269,6 +276,7 @@ function registerMessageRoutes(app, deps) {
     const enriched = normalizedMessages
       .map((message) => ({
         ...message,
+        clientRequestId: message.client_request_id || null,
         read_by_me:
           Number(message?.user_id || 0) === Number(user.id) ||
           readByMe.has(Number(message.id)),
@@ -378,6 +386,45 @@ function registerMessageRoutes(app, deps) {
     emitChatEvent(Number(chatId), {
       type: "chat_read",
       chatId: Number(chatId),
+      username: user.username,
+    });
+
+    res.json({ ok: true });
+  });
+
+  app.post("/api/messages/read-one", (req, res) => {
+    const session = requireSession(req, res);
+    if (!session) return;
+
+    const { chatId, username, messageId } = req.body || {};
+    if (!chatId || !username || !messageId) {
+      return res.status(400).json({
+        error: "Chat id, username, and messageId are required.",
+      });
+    }
+
+    if (!requireSessionUsernameMatch(res, session, username)) return;
+
+    const user = findUserByUsername(username.toLowerCase());
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    if (!isMember(Number(chatId), user.id)) {
+      return res.status(403).json({ error: "Not a member of this chat." });
+    }
+
+    const message = findMessageById(Number(messageId));
+    if (!message || Number(message.chat_id) !== Number(chatId)) {
+      return res.status(404).json({ error: "Message not found in this chat." });
+    }
+
+    markMessageRead(Number(messageId), user.id);
+
+    emitChatEvent(Number(chatId), {
+      type: "chat_read",
+      chatId: Number(chatId),
+      messageId: Number(messageId),
       username: user.username,
     });
 
@@ -1126,6 +1173,15 @@ function registerMessageRoutes(app, deps) {
     if (!message || Number(message.chat_id) !== numericChatId) {
       return res.status(404).json({ error: "Message not found." });
     }
+    const chat = findChatById(numericChatId);
+    if (!chat) {
+      return res.status(404).json({ error: "Chat not found." });
+    }
+    if (!canUserPostInChat(numericChatId, user.id, chat)) {
+      return res
+        .status(403)
+        .json({ error: "Only channel owner can send messages." });
+    }
     if (Number(message.user_id || 0) !== Number(user.id)) {
       return res.status(403).json({ error: "Only the author can edit this message." });
     }
@@ -1172,9 +1228,14 @@ function registerMessageRoutes(app, deps) {
       : "self";
 
     if (deleteScope === "everyone") {
+      const chat = findChatById(numericChatId);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found." });
+      }
       const role = String(getChatMemberRole(numericChatId, user.id)).toLowerCase();
       const canDeleteForEveryone =
-        Number(message.user_id || 0) === Number(user.id) || role === "owner";
+        canUserPostInChat(numericChatId, user.id, chat) &&
+        (Number(message.user_id || 0) === Number(user.id) || role === "owner");
       if (!canDeleteForEveryone) {
         return res.status(403).json({
           error: "You cannot delete this message for everyone.",

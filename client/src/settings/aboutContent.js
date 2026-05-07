@@ -14,11 +14,17 @@ export const ABOUT_CONTENT = {
     },
     {
       icon: "website",
-      href: "https://chat.pouyakhalili.ir/invite/c592b42783ba50a9833f6f4e15c5126a01b4f512242b5921",
+      href: "https://chat.songbird.website/invite/c592b42783ba50a9833f6f4e15c5126a01b4f512242b5921",
     },
   ],
   supportIntro:
     "If Songbird is useful to you, you can support ongoing development with these wallets:",
+  donationLink: {
+    href: "https://nowpayments.io/donation/blackbull",
+    title: "NOWPAYMENTS",
+    description: "Donate with any currency",
+    buttonLabel: "Support",
+  },
   wallets: [
     {
       label: "TRX",

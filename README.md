@@ -102,6 +102,16 @@ cd /opt/songbird
 git clone https://github.com/bllackbull/Songbird.git .
 ```
 
+Create a self-signed cert in `certs/` directory if running the app on SSL:
+
+```bash
+openssl req -x509 -newkey rsa:2048 \
+  -keyout certs/key.pem \
+  -out certs/cert.pem \
+  -days 365 -nodes \
+  -subj "/CN=localhost"
+```
+
 ### 3. Build container
 
 ```bash
@@ -115,8 +125,9 @@ Optional: Verify container is built successfully:
 docker compose -f docker-compose.yaml ps
 docker compose -f docker-compose.yaml logs -f
 ```
-
-To complete the setup, refer to the [Configure Nginx](#configure-nginx) section.
+> [!IMPORTANT]
+> Docker automatically configures the nginx config to run on port 443 using the self-signed cert you previosuly generated.  
+>To change and customize the nginx config, refer to the [Configure Nginx](#configure-nginx) section.
 
 ## Manual Installation
 
@@ -257,7 +268,7 @@ Create `/etc/nginx/sites-available/songbird`:
 > [!IMPORTANT]
 > - Keep `proxy_pass` aligned with `SERVER_PORT`.
 > - Keep the Nginx `listen` port aligned with `CLIENT_PORT`.
-> - Keep `client_max_body_size` aligned with `FILE_UPLOAD_MAX_TOTAL_SIZE`.
+> - Keep `client_max_body_size` aligned with `FILE_UPLOAD_MAX_TOTAL_SIZE_MB`.
 
 ### HTTP only
 
@@ -267,7 +278,7 @@ Use this if you are not enabling SSL yet:
 server {
   listen 80 default_server;
   server_name example.com www.example.com;
-  client_max_body_size 78643200;
+  client_max_body_size 75m;
 
   location /api/events {
     proxy_pass http://127.0.0.1:5174;
@@ -311,7 +322,7 @@ After you have certificate files, switch to this:
 server {
   listen 443 ssl default_server;
   server_name example.com www.example.com;
-  client_max_body_size 78643200;
+  client_max_body_size 75m;
 
   ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
@@ -436,10 +447,10 @@ nano .env
 | `CLIENT_PORT` | `integer` | `80` | Nginx listen port (what users connect to). |
 | `APP_ENV` | `string` | `production` | Server runtime mode (`production` recommended/default). |
 | `APP_DEBUG` | `boolean` | `false` | Enable verbose server debug logs in terminal/stdout (`[app-debug]` lines for message send/upload/transcode/metadata events). |
-| `ACCOUNT_CREATION` | `boolean` | `true` | Allow new accounts to be created via the website (`/signup`). |
+| `SIGN_UP` | `boolean` | `true` | Allow new accounts to be created via the website (`/signup`). (`ACCOUNT_CREATION` is supported as a legacy fallback.) |
 | `FILE_UPLOAD` | `boolean` | `true` | Enable/disable all uploads globally (chat files + avatars). |
-| `FILE_UPLOAD_MAX_SIZE` | `integer` | `26214400` | Per-file upload max size (bytes). |
-| `FILE_UPLOAD_MAX_TOTAL_SIZE` | `integer` | `78643200` | Per-message total upload size cap (bytes). |
+| `FILE_UPLOAD_MAX_SIZE_MB` | `integer` | `25` | Per-file upload max size (MB). (`FILE_UPLOAD_MAX_SIZE` is supported as a legacy fallback in bytes.) |
+| `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` | `integer` | `75` | Per-message total upload size cap (MB). (`FILE_UPLOAD_MAX_TOTAL_SIZE` is supported as a legacy fallback in bytes.) |
 | `FILE_UPLOAD_MAX_FILES` | `integer` | `10` | Max uploaded files in one message. |
 | `FILE_UPLOAD_TRANSCODE_VIDEOS` | `boolean` | `true` | Convert uploaded videos to H.264/AAC MP4 and keep only the converted file. Requires `ffmpeg`. |
 | `MESSAGE_FILE_RETENTION` | `integer` | `7` | Auto-delete uploaded message files after N days (`0` disables). |
@@ -458,10 +469,10 @@ nano .env
 | `CHAT_HEALTH_CHECK_INTERVAL` | `integer` | `10000` | Connection health check interval (milliseconds). |
 | `CHAT_SSE_RECONNECT_DELAY` | `integer` | `2000` | Delay before reconnecting SSE after error (milliseconds). |
 | `CHAT_SEARCH_MAX_RESULTS` | `integer` | `5` | Max users shown in search results. |
-| `CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES` | `integer` | `5242880` | Max audio file size (bytes) allowed for client-side waveform decode. |
+| `CHAT_VOICE_WAVEFORM_MAX_DECODE_MB` | `integer` | `5` | Max audio file size (MB) allowed for client-side waveform decode. (`CHAT_VOICE_WAVEFORM_MAX_DECODE_BYTES` is supported as a legacy fallback in bytes.) |
 | `CHAT_VOICE_WAVEFORM_MAX_DECODE_SECONDS` | `integer` | `480` | Max audio duration (seconds) allowed for client-side waveform decode. |
-| `NICKNAME_MAX` | `integer` | `24` | Max nickname length for users and groups. |
-| `USERNAME_MAX` | `integer` | `16` | Max username length for users and groups. |
+| `NICKNAME_MAX_CHARS` | `integer` | `24` | Max nickname length for users and groups. (`NICKNAME_MAX` is supported as a legacy fallback.) |
+| `USERNAME_MAX_CHARS` | `integer` | `16` | Max username length for users and groups. (`USERNAME_MAX` is supported as a legacy fallback.) |
 | `STORAGE_ENCRYPTION_KEY` | `string` | auto-generated | Persistent encryption-at-rest key. Changing this value without first decrypting old data will make previously encrypted content unreadable. |
 | `VAPID_PUBLIC_KEY` | `string` | auto-generated | Web Push public key (required for push notifications). |
 | `VAPID_PRIVATE_KEY` | `string` | auto-generated | Web Push private key (required for push notifications). |
@@ -471,7 +482,7 @@ nano .env
 > **Push notifications require HTTPS** (except `localhost` for development). iOS requires an installed PWA (iOS 16.4+).
 
 > [!IMPORTANT]
-> **Encryption at rest:** Songbird auto-generates `STORAGE_ENCRYPTION_KEY` on first run and saves it into `.env`. Keep that value stable. On startup, the server backfills existing stored messages and message-upload files into encrypted form when needed.
+> **Encryption at rest:** Songbird auto-generates `STORAGE_ENCRYPTION_KEY` on first run and saves it into `.env`. Keep that value stable. On startup, the server backfills existing stored messages, message-upload files, and avatar files into encrypted form when needed.
 
 ### Apply Changes:
 
@@ -573,8 +584,8 @@ You can use these commands while in `/opt/songbird/server` directory to manage y
 - Create a group or channel: `npm run db:chat:create`
 - Add users to a group/channel: `npm run db:chat:add`
 - Edit a group/channel profile or transfer ownership: `npm run db:chat:edit`
-- Delete chats (all or selected ids): `npm run db:chat:delete` (requires `--all` to delete everything)
-- Delete files (all or selected ids/filenames): `npm run db:file:delete`
+- Delete chats (all or selected ids/usernames): `npm run db:chat:delete` (requires `--all` to delete everything)
+- Delete files (all or selected ids/filenames): `npm run db:file:delete` (requires `--all` to delete everything)
 - Edit a user profile: `npm run db:user:edit`
 - Toggle user ban/unban: `npm run db:user:ban`
 - Delete users (all or selected ids/usernames): `npm run db:user:delete` (requires `--all` to delete everything)
@@ -607,7 +618,7 @@ npm run db:reset -y
 npm run db:delete --yes
 npm run db:chat:delete 12 -y
 npm run db:chat:delete -- --all -y
-npm run db:file:delete -y
+npm run db:file:delete -- --all -y
 npm run db:file:delete 42 -y
 npm run db:file:delete FILE_NAME -y
 npm run db:user:delete songbird.sage -y
@@ -760,6 +771,30 @@ If you like this project which I hope you do, consider supporting your favorite 
 <a href="https://nowpayments.io/donation?api_key=0b61dd3e-6508-4849-ad92-1dde65442937" target="_blank" rel="noreferrer noopener">
     <img src="https://nowpayments.io/images/embeds/donation-button-black.svg" alt="Crypto donation button by NOWPayments">
 </a>
+
+### TRX:
+
+```
+TPf1bEhipKpGkjo5N2Scj9nufNNh5TNrwX
+```
+
+### USDT (TRC20):
+
+```
+0x63313383611BbE11f4fEc139c14ad0b70281b822
+```
+
+### BTC:
+
+```
+bc1q9hupvcc39juhf0k7rgzn6phn8s8jez365kzmuj
+```
+
+### TON:
+
+```
+UQDzQ3xbWzKQvw8X8sWU82dksBeYqTHrT9sLzhBOyaESPjVy
+```
 
 ## License
 

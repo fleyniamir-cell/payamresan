@@ -25,6 +25,7 @@ export function useAppContextMenu({
   chats,
   currentUsername,
   canCurrentUserEditGroup,
+  canReplyToMessage,
   canEditMessage,
   canDeleteMessageForEveryone,
   onReplyToMessage,
@@ -40,6 +41,17 @@ export function useAppContextMenu({
   onDeleteChats,
 }) {
   const [contextMenu, setContextMenu] = useState(null);
+
+  const findContextMenuLinkTarget = useCallback((eventTarget, targetEl) => {
+    const eventNode =
+      eventTarget instanceof Element ? eventTarget : eventTarget?.parentElement || null;
+    if (!eventNode || !targetEl || !targetEl.contains(eventNode)) return null;
+    const anchor = eventNode.closest("a[href]");
+    if (!anchor || !targetEl.contains(anchor)) return null;
+    const href = String(anchor.href || anchor.getAttribute("href") || "").trim();
+    if (!href) return null;
+    return href;
+  }, []);
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
@@ -85,22 +97,29 @@ export function useAppContextMenu({
       if (kind === "message") {
         const message = data?.message || null;
         const hasText = hasMessageText(message);
+        const linkTarget = findContextMenuLinkTarget(event?.target, targetEl);
         const files = getMessageFiles(message);
         items.push(
-          {
-            id: "reply",
-            label: "Reply",
-            icon: Reply,
-            onSelect: () => onReplyToMessage?.(message),
-          },
+          ...(canReplyToMessage
+            ? [
+                {
+                  id: "reply",
+                  label: "Reply",
+                  icon: Reply,
+                  onSelect: () => onReplyToMessage?.(message),
+                },
+              ]
+            : []),
           ...(hasText
             ? [
                 {
-                  id: "copy",
-                  label: "Copy text",
+                  id: linkTarget ? "copy-link" : "copy",
+                  label: linkTarget ? "Copy link" : "Copy text",
                   icon: Copy,
                   onSelect: () =>
-                    copyTextToClipboard(extractMessageBodyText(message?.body)),
+                    copyTextToClipboard(
+                      linkTarget || extractMessageBodyText(message?.body),
+                    ),
                 },
               ]
             : []),
@@ -218,16 +237,24 @@ export function useAppContextMenu({
       }
 
       if (!items.length) return;
+      const message = kind === "message" ? data?.message || null : null;
       setContextMenu({
         kind,
         point,
         items,
+        targetEl: targetEl || null,
+        targetChatId: Number(activeChatId || 0) || null,
+        targetMessageKey: message
+          ? String(message?._clientId ?? message?._serverId ?? message?.id ?? "")
+          : "",
       });
     },
     [
       activeChatId,
+      canReplyToMessage,
       canCurrentUserEditGroup,
       currentUsername,
+      findContextMenuLinkTarget,
       findExistingDmWithUser,
       handleMarkChatSeen,
       onDeleteChats,

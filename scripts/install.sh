@@ -2717,6 +2717,82 @@ run_migrations() {
   run_in_install_dir "npm --prefix server run db:migrate" || return 1
 }
 
+songbird_service_is_running() {
+  if have_cmd systemctl && systemctl is-active --quiet songbird.service 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+songbird_healthcheck_responds() {
+  local port="$1"
+
+  if have_cmd curl; then
+    curl --fail --silent --show-error --max-time 1 "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1
+    return $?
+  fi
+
+  if have_cmd wget; then
+    wget -q -T 1 -O /dev/null "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1
+    return $?
+  fi
+
+  if have_cmd node; then
+    node -e '
+const http = require("node:http");
+const port = Number(process.argv[1]);
+if (!Number.isFinite(port) || port <= 0) process.exit(1);
+const req = http.request(
+  {
+    hostname: "127.0.0.1",
+    port,
+    path: "/api/health",
+    method: "GET",
+    timeout: 600,
+  },
+  (res) => {
+    res.resume();
+    process.exit(res.statusCode >= 200 && res.statusCode < 300 ? 0 : 1);
+  },
+);
+req.on("timeout", () => req.destroy());
+req.on("error", () => process.exit(1));
+req.end();
+setTimeout(() => process.exit(1), 800).unref();
+' "$port" >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+ensure_songbird_stopped_for_update() {
+  local port=""
+  port="$(get_existing_env_value_with_fallback "SERVER_PORT" "PORT" "$DEFAULT_SERVER_PORT")"
+  port="$(strip_surrounding_quotes "$port")"
+  port="${port#"${port%%[![:space:]]*}"}"
+  port="${port%"${port##*[![:space:]]}"}"
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    port="$DEFAULT_SERVER_PORT"
+  fi
+
+  log "Checking whether Songbird is running before update..."
+
+  if songbird_service_is_running; then
+    warn "Songbird service is running. Stop it before updating so database migrations cannot race the running server."
+    press_enter_to_continue
+    return 1
+  fi
+
+  if songbird_healthcheck_responds "$port"; then
+    warn "Songbird is running on port ${port}. Stop it before updating so database migrations cannot race the running server."
+    press_enter_to_continue
+    return 1
+  fi
+
+  return 0
+}
+
 update_nginx_runtime_values() {
   if [[ ! -f "$NGINX_SITE_FILE" ]]; then
     warn "Nginx site config not found at ${NGINX_SITE_FILE}. Skipping nginx update."
@@ -2772,16 +2848,18 @@ rebuild_and_restart_after_settings_change() {
 }
 
 update_songbird() {
-  if [[ -d "$INSTALL_DIR" ]]; then
-    if [[ "$(prompt_yes_no "Create a database backup before updating?" "no")" == "yes" ]]; then
-      backup_database || return 1
-    else
-      log "Skipping pre-update backup."
-    fi
-  else
+  if [[ ! -d "$INSTALL_DIR" ]]; then
     warn "No Songbird install found at ${INSTALL_DIR}."
     press_enter_to_continue
     return 0
+  fi
+
+  ensure_songbird_stopped_for_update || return 1
+
+  if [[ "$(prompt_yes_no "Create a database backup before updating?" "no")" == "yes" ]]; then
+    backup_database || return 1
+  else
+    log "Skipping pre-update backup."
   fi
 
   prompt_source_mode

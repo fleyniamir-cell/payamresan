@@ -22,6 +22,7 @@ import { migration021ChatQueryIndexes } from "./021-chat-query-indexes.js";
 import { migration022MessageClientRequestId } from "./022-message-client-request-id.js";
 import { migration023ChatLeftMembers } from "./023-chat-left-members.js";
 import { migration024RemoteChannelQueue } from "./024-remote-channel-queue.js";
+import { migration025RemoteChannelPerformance } from "./025-remote-channel-performance.js";
 
 export const migrations = [
   migration001InitialSchema,
@@ -48,4 +49,5 @@ export const migrations = [
   migration022MessageClientRequestId,
   migration023ChatLeftMembers,
   migration024RemoteChannelQueue,
+  migration025RemoteChannelPerformance,
 ];

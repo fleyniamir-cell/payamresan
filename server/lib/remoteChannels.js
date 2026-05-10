@@ -603,6 +603,10 @@ function createRemoteChannelManager(deps = {}) {
   const maxAttempts = Math.max(1, Number(config.queueMaxAttempts || 10));
   const staleLockMs = Math.max(10_000, Number(config.queueStaleLockMs || 5 * 60_000));
   const queueBatchSize = Math.max(1, Math.min(50, Number(config.queueBatchSize || 10)));
+  const providerStateHeartbeatMs = Math.max(
+    pollIntervalMs,
+    Number(config.providerStateHeartbeatMs || 60_000),
+  );
   const messageTextRetentionDays = Number(config.messageTextRetentionDays || 0);
   const messageFileRetentionDays = Number(config.messageFileRetentionDays || 0);
   const messageMaxChars = Math.max(1, Number(config.messageMaxChars || 4000));
@@ -634,6 +638,7 @@ function createRemoteChannelManager(deps = {}) {
   let queueLoopRunning = false;
   let queueTimer = null;
   let client = null;
+  let lastProviderStateSavedAt = 0;
 
   const log = (...args) => debugLog("remote-channel", ...args);
 
@@ -720,7 +725,12 @@ function createRemoteChannelManager(deps = {}) {
     return { entity, title, username, sourceChatId, avatarUrl };
   }
 
-  async function syncResolvedSourceMetadata(activeClient, source, resolved = null) {
+  async function syncResolvedSourceMetadata(
+    activeClient,
+    source,
+    resolved = null,
+    options = {},
+  ) {
     const nextResolved =
       resolved || await resolveSource(activeClient, source, { forceRefresh: true });
     const targetChat = findChatById(Number(source.chat_id || 0));
@@ -764,6 +774,8 @@ function createRemoteChannelManager(deps = {}) {
       sourceUsername: nextResolved.username,
       sourceTitle: nextResolved.title,
       sourceAvatarUrl: nextResolved.avatarUrl,
+      touch: options.touch,
+      clearError: options.clearError,
     });
     return nextResolved;
   }
@@ -801,6 +813,7 @@ function createRemoteChannelManager(deps = {}) {
       await resolveSource(activeClient, source, {
         forceRefresh: syncMetadata,
       }),
+      { touch: false },
     );
     const lastMessageId = Number(source?.last_remote_message_id || 0) || 0;
     if (!lastMessageId) {
@@ -812,6 +825,7 @@ function createRemoteChannelManager(deps = {}) {
         sourceTitle: resolved.title,
         sourceAvatarUrl: resolved.avatarUrl,
         lastRemoteMessageId: latestMessageId,
+        touch: true,
       });
       return { queued: 0, initialized: true };
     }
@@ -872,6 +886,7 @@ function createRemoteChannelManager(deps = {}) {
       sourceTitle: resolved.title,
       sourceAvatarUrl: resolved.avatarUrl,
       lastRemoteMessageId: maxSeenId,
+      touch: maxSeenId > lastMessageId,
     });
 
     return { queued, initialized: false };
@@ -889,7 +904,9 @@ function createRemoteChannelManager(deps = {}) {
       if (stopped) return;
       try {
         await pollSource(activeClient, source);
-        updateRemoteChannelSourceError(source.id, "");
+        if (source.last_error) {
+          updateRemoteChannelSourceError(source.id, "");
+        }
       } catch (error) {
         const message = errorMessage(error);
         updateRemoteChannelSourceError(source.id, message);
@@ -898,11 +915,18 @@ function createRemoteChannelManager(deps = {}) {
     }
 
     const state = getRemoteChannelProviderState("telegram") || {};
-    setRemoteChannelProviderState("telegram", {
-      nextUpdateOffset: Number(state.next_update_offset || 0) || null,
-      lastError: null,
-      lastPolledAt: new Date().toISOString(),
-    });
+    const now = Date.now();
+    if (
+      state.last_error ||
+      now - lastProviderStateSavedAt >= providerStateHeartbeatMs
+    ) {
+      setRemoteChannelProviderState("telegram", {
+        nextUpdateOffset: Number(state.next_update_offset || 0) || null,
+        lastError: null,
+        lastPolledAt: new Date(now).toISOString(),
+      });
+      lastProviderStateSavedAt = now;
+    }
   }
 
   async function runPollLoop() {
@@ -920,6 +944,7 @@ function createRemoteChannelManager(deps = {}) {
             lastError: message,
             lastPolledAt: new Date().toISOString(),
           });
+          lastProviderStateSavedAt = Date.now();
           log("poll:error", { error: message });
         }
         await sleep(pollIntervalMs);

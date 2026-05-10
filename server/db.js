@@ -111,7 +111,12 @@ function run(sql, params = []) {
   stmt.step();
   stmt.free();
 
-  scheduleDatabaseSave();
+  const changedRows =
+    typeof db.getRowsModified === "function" ? Number(db.getRowsModified()) : 1;
+  if (changedRows > 0) {
+    scheduleDatabaseSave();
+  }
+  return changedRows;
 }
 
 function runWithoutSave(sql, params = []) {
@@ -197,11 +202,14 @@ function runDatabaseMigrations() {
     (a, b) => a.version - b.version,
   );
 
+  let appliedMigration = false;
+
   orderedMigrations.forEach((migration) => {
     if (getSchemaVersion() >= migration.version) return;
 
     migration.up(migrationContext);
     setSchemaVersion(migration.version);
+    appliedMigration = true;
   });
 
   // Self-heal schemas where PRAGMA user_version advanced but tables are missing.
@@ -219,6 +227,11 @@ function runDatabaseMigrations() {
 
   if (getSchemaVersion() < latestVersion) {
     setSchemaVersion(latestVersion);
+    appliedMigration = true;
+  }
+
+  if (appliedMigration) {
+    databaseDirty = true;
   }
 }
 
@@ -597,60 +610,110 @@ export function listEnabledRemoteChannelSources(provider = "telegram") {
 }
 
 export function updateRemoteChannelSourceSeen(sourceId, payload = {}) {
+  const id = Number(sourceId || 0);
+  if (!id) return 0;
+
+  const current = getRemoteChannelSourceById(id);
+  if (!current?.id) return 0;
+
   const sourceChatId = normalizeRemoteSourceChatId(payload.sourceChatId);
   const sourceUsername = normalizeRemoteSourceUsername(payload.sourceUsername);
-  const sourceTitle = Object.prototype.hasOwnProperty.call(payload, "sourceTitle")
+  const hasSourceTitle = Object.prototype.hasOwnProperty.call(
+    payload,
+    "sourceTitle",
+  );
+  const sourceTitle = hasSourceTitle
     ? String(payload.sourceTitle || "").trim() || null
     : undefined;
-  const sourceAvatarUrl = Object.prototype.hasOwnProperty.call(
+  const hasSourceAvatarUrl = Object.prototype.hasOwnProperty.call(
     payload,
     "sourceAvatarUrl",
-  )
+  );
+  const sourceAvatarUrl = hasSourceAvatarUrl
     ? String(payload.sourceAvatarUrl || "").trim() || null
     : undefined;
-  const lastRemoteMessageId = Number.isFinite(Number(payload.lastRemoteMessageId))
+  const hasLastRemoteMessageId = Number.isFinite(
+    Number(payload.lastRemoteMessageId),
+  );
+  const lastRemoteMessageId = hasLastRemoteMessageId
     ? Math.max(0, Math.trunc(Number(payload.lastRemoteMessageId)))
     : null;
-  run(
+  const currentLastRemoteMessageId =
+    Number(current.last_remote_message_id || 0) || 0;
+  const sourceChatIdChanged =
+    Boolean(sourceChatId) &&
+    String(current.source_chat_id || "") !== String(sourceChatId || "");
+  const sourceUsernameChanged =
+    Boolean(sourceUsername) &&
+    String(current.source_username || "") !== String(sourceUsername || "");
+  const sourceTitleChanged =
+    hasSourceTitle &&
+    String(current.source_title || "") !== String(sourceTitle || "");
+  const sourceAvatarUrlChanged =
+    hasSourceAvatarUrl &&
+    String(current.source_avatar_url || "") !== String(sourceAvatarUrl || "");
+  const lastRemoteMessageIdAdvanced =
+    hasLastRemoteMessageId && lastRemoteMessageId > currentLastRemoteMessageId;
+  const shouldTouch = payload.touch !== false;
+  const shouldClearError =
+    payload.clearError !== false && Boolean(String(current.last_error || ""));
+  const shouldUpdate =
+    shouldTouch ||
+    shouldClearError ||
+    sourceChatIdChanged ||
+    sourceUsernameChanged ||
+    sourceTitleChanged ||
+    sourceAvatarUrlChanged ||
+    lastRemoteMessageIdAdvanced;
+
+  if (!shouldUpdate) return 0;
+
+  return run(
     `UPDATE remote_channel_sources
-     SET source_chat_id = COALESCE(?, source_chat_id),
-         source_username = COALESCE(?, source_username),
+     SET source_chat_id = CASE WHEN ? THEN ? ELSE source_chat_id END,
+         source_username = CASE WHEN ? THEN ? ELSE source_username END,
          source_title = CASE WHEN ? THEN ? ELSE source_title END,
          source_avatar_url = CASE WHEN ? THEN ? ELSE source_avatar_url END,
          last_remote_message_id = CASE
-           WHEN ? IS NOT NULL AND (
-             last_remote_message_id IS NULL OR ? > last_remote_message_id
-           ) THEN ?
-           ELSE last_remote_message_id
+           WHEN ? THEN ? ELSE last_remote_message_id
          END,
-         last_seen_at = datetime('now'),
-         last_error = NULL,
+         last_seen_at = CASE WHEN ? THEN datetime('now') ELSE last_seen_at END,
+         last_error = CASE WHEN ? THEN NULL ELSE last_error END,
          updated_at = datetime('now')
      WHERE id = ?`,
     [
+      sourceChatIdChanged ? 1 : 0,
       sourceChatId,
+      sourceUsernameChanged ? 1 : 0,
       sourceUsername,
-      sourceTitle !== undefined ? 1 : 0,
-      sourceTitle === undefined ? null : sourceTitle,
-      sourceAvatarUrl !== undefined ? 1 : 0,
-      sourceAvatarUrl === undefined ? null : sourceAvatarUrl,
+      sourceTitleChanged ? 1 : 0,
+      hasSourceTitle ? sourceTitle : null,
+      sourceAvatarUrlChanged ? 1 : 0,
+      hasSourceAvatarUrl ? sourceAvatarUrl : null,
+      lastRemoteMessageIdAdvanced ? 1 : 0,
       lastRemoteMessageId,
-      lastRemoteMessageId,
-      lastRemoteMessageId,
-      Number(sourceId),
+      shouldTouch ? 1 : 0,
+      shouldClearError ? 1 : 0,
+      id,
     ],
   );
-  saveDatabase();
 }
 
 export function updateRemoteChannelSourceError(sourceId, error) {
-  run(
+  const id = Number(sourceId || 0);
+  if (!id) return 0;
+
+  const nextError = String(error || "").slice(0, 1000) || null;
+  const current = getRemoteChannelSourceById(id);
+  if (!current?.id) return 0;
+  if (String(current.last_error || "") === String(nextError || "")) return 0;
+
+  return run(
     `UPDATE remote_channel_sources
      SET last_error = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [String(error || "").slice(0, 1000) || null, Number(sourceId)],
+    [nextError, id],
   );
-  saveDatabase();
 }
 
 export function getRemoteChannelProviderState(provider = "telegram") {
@@ -687,7 +750,7 @@ export function setRemoteChannelProviderState(provider = "telegram", payload = {
       ? current?.last_polled_at || null
       : lastPolledAt;
 
-  run(
+  return run(
     `INSERT INTO remote_channel_provider_state (
        provider, next_update_offset, last_error, last_polled_at, updated_at
      )
@@ -699,7 +762,6 @@ export function setRemoteChannelProviderState(provider = "telegram", payload = {
        updated_at = datetime('now')`,
     [normalizedProvider, nextOffset, nextError, nextPolledAt],
   );
-  saveDatabase();
 }
 
 export function enqueueRemoteChannelQueueItem(payload = {}) {
@@ -720,7 +782,7 @@ export function enqueueRemoteChannelQueueItem(payload = {}) {
   const payloadJson = String(payload.payloadJson || "").trim();
   if (!payloadJson) return null;
 
-  run(
+  const inserted = run(
     `INSERT OR IGNORE INTO remote_channel_queue (
        source_id, provider, telegram_update_id, telegram_message_id,
        source_version, payload_json, status, next_attempt_at
@@ -735,7 +797,7 @@ export function enqueueRemoteChannelQueueItem(payload = {}) {
       payloadJson,
     ],
   );
-  saveDatabase();
+  if (!inserted) return null;
 
   return getRow(
     `SELECT id, source_id, provider, telegram_update_id, telegram_message_id,
@@ -842,7 +904,7 @@ export function claimNextRemoteChannelQueueItem(lockOwner, nowIso) {
 }
 
 export function markRemoteChannelQueueItemDone(id, messageId) {
-  run(
+  return run(
     `UPDATE remote_channel_queue
      SET status = 'done',
          locked_at = NULL,
@@ -853,11 +915,10 @@ export function markRemoteChannelQueueItemDone(id, messageId) {
      WHERE id = ?`,
     [Number(messageId) || null, Number(id)],
   );
-  saveDatabase();
 }
 
 export function markRemoteChannelQueueItemSkipped(id, reason) {
-  run(
+  return run(
     `UPDATE remote_channel_queue
      SET status = 'skipped',
          locked_at = NULL,
@@ -867,11 +928,10 @@ export function markRemoteChannelQueueItemSkipped(id, reason) {
      WHERE id = ?`,
     [String(reason || "Skipped").slice(0, 1000), Number(id)],
   );
-  saveDatabase();
 }
 
 export function markRemoteChannelQueueItemRetry(id, payload = {}) {
-  run(
+  return run(
     `UPDATE remote_channel_queue
      SET status = ?,
          attempts = attempts + 1,
@@ -882,12 +942,13 @@ export function markRemoteChannelQueueItemRetry(id, payload = {}) {
      WHERE id = ?`,
     [
       payload.failed ? "failed" : "retry",
-      payload.failed ? null : String(payload.nextAttemptAt || new Date().toISOString()),
+      payload.failed
+        ? null
+        : String(payload.nextAttemptAt || new Date().toISOString()),
       String(payload.error || "").slice(0, 1000) || null,
       Number(id),
     ],
   );
-  saveDatabase();
 }
 
 export function removeChatMember(chatId, userId) {
@@ -1884,23 +1945,28 @@ export function getUserPresence(username) {
 }
 
 export function markMessagesRead(chatId, readerId) {
-  const recentRows = getAll(
-    `SELECT id FROM chat_messages
-     WHERE chat_id = ?
-       AND (
-         user_id != ?
-         OR ${REMOTE_MESSAGE_CLIENT_REQUEST_SQL}
-       )
-       AND id NOT IN (SELECT message_id FROM chat_message_reads WHERE user_id = ?)
-     ORDER BY id DESC`,
-    [Number(chatId), Number(readerId), Number(readerId)],
-  );
-  if (!recentRows.length) return;
+  const cid = Number(chatId);
+  const uid = Number(readerId);
+  if (!cid || !uid) return;
 
-  const messageIds = recentRows
-    .map((row) => Number(row.id))
-    .filter((id) => Number.isFinite(id) && id > 0);
-  if (!messageIds.length) return;
+  const inserted = run(
+    `INSERT OR IGNORE INTO chat_message_reads (message_id, user_id, read_at)
+     SELECT cm.id, ?, datetime('now')
+     FROM chat_messages cm
+     WHERE cm.chat_id = ?
+       AND (
+         cm.user_id != ?
+         OR LOWER(COALESCE(cm.client_request_id, '')) LIKE 'remote:%'
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM chat_message_reads cmr
+         WHERE cmr.message_id = cm.id
+           AND cmr.user_id = ?
+       )`,
+    [uid, cid, uid, uid],
+  );
+  if (!inserted) return;
 
   run(
     `
@@ -1913,18 +1979,8 @@ export function markMessagesRead(chatId, readerId) {
       )
       AND read_at IS NULL
   `,
-    [readerId, chatId, readerId],
+    [uid, cid, uid],
   );
-  const chunkSize = 300;
-  for (let i = 0; i < messageIds.length; i += chunkSize) {
-    const chunk = messageIds.slice(i, i + chunkSize);
-    const placeholders = chunk.map(() => "(?, ?, datetime('now'))").join(", ");
-    run(
-      `INSERT OR IGNORE INTO chat_message_reads (message_id, user_id, read_at)
-       VALUES ${placeholders}`,
-      chunk.flatMap((id) => [id, Number(readerId)]),
-    );
-  }
 }
 
 export function getMessageReadCounts(messageIds = []) {

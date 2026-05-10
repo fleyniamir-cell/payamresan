@@ -1,3 +1,5 @@
+import rateLimit from "express-rate-limit";
+
 function registerMessageRoutes(app, deps) {
   const {
     APP_DEBUG,
@@ -80,6 +82,36 @@ function registerMessageRoutes(app, deps) {
     const role = String(getChatMemberRole(Number(chatId), Number(userId))).toLowerCase();
     return role === "owner";
   };
+
+  const messageRateLimitHandler = (_req, res) =>
+    res.status(429).json({
+      error: "Too many message requests. Please try again later.",
+    });
+
+  const messageUploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: messageRateLimitHandler,
+  });
+
+  const messageEditLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: messageRateLimitHandler,
+  });
+
+  const isRemoteChannelMessage = (message) =>
+    /^remote:/i.test(
+      String(message?.client_request_id || message?.clientRequestId || "").trim(),
+    );
+
+  const isMessageAuthoredByUser = (message, userId) =>
+    Number(message?.user_id || 0) === Number(userId) &&
+    !isRemoteChannelMessage(message);
 
   const normalizeForwardOriginAvatarUrl = (userId, avatarUrl) => {
     const normalized = ensureAvatarExists(userId, avatarUrl);
@@ -278,7 +310,7 @@ function registerMessageRoutes(app, deps) {
         ...message,
         clientRequestId: message.client_request_id || null,
         read_by_me:
-          Number(message?.user_id || 0) === Number(user.id) ||
+          isMessageAuthoredByUser(message, user.id) ||
           readByMe.has(Number(message.id)),
         files: filesByMessageId[Number(message.id)] || [],
         expiresAt: null,
@@ -291,7 +323,7 @@ function registerMessageRoutes(app, deps) {
             : null,
       }))
       .filter((message) => {
-        const isFromOther = Number(message?.user_id || 0) !== Number(user.id);
+        const isFromOther = !isMessageAuthoredByUser(message, user.id);
         if (!isFromOther) return true;
 
         const hasPendingVideo = (message.files || []).some(
@@ -525,6 +557,7 @@ function registerMessageRoutes(app, deps) {
 
   app.post(
     "/api/messages/upload",
+    messageUploadLimiter,
     uploadFiles.array("files", MESSAGE_FILE_LIMITS.maxFiles),
     async (req, res) => {
       const session = requireSession(req, res);
@@ -647,7 +680,7 @@ function registerMessageRoutes(app, deps) {
               error: "Edit target is not available in this chat.",
             });
           }
-          if (Number(editTarget.user_id || 0) !== Number(user.id)) {
+          if (!isMessageAuthoredByUser(editTarget, user.id)) {
             removeUploadedFiles(uploadedFiles);
             return res.status(403).json({
               error: "Only the message author can edit this message.",
@@ -1134,7 +1167,7 @@ function registerMessageRoutes(app, deps) {
     })();
   });
 
-  app.post("/api/messages/edit", async (req, res) => {
+  app.post("/api/messages/edit", messageEditLimiter, async (req, res) => {
     const session = requireSession(req, res);
     if (!session) return;
 
@@ -1182,7 +1215,7 @@ function registerMessageRoutes(app, deps) {
         .status(403)
         .json({ error: "Only channel owner can send messages." });
     }
-    if (Number(message.user_id || 0) !== Number(user.id)) {
+    if (!isMessageAuthoredByUser(message, user.id)) {
       return res.status(403).json({ error: "Only the author can edit this message." });
     }
 

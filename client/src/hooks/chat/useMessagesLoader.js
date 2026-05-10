@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  isMessageAuthoredByUser,
+  isMessageFromOtherUser,
+} from "../../utils/messageOwnership.js";
 
 const SILENT_FETCH_TRACK_MAX_CHATS = 40;
+const SILENT_FETCH_MIN_INTERVAL_MS = 320;
+
+const isDocumentActive = () => {
+  if (typeof document === "undefined") return false;
+  return document.visibilityState === "visible" && document.hasFocus();
+};
 
 export function useMessagesLoader({
   user,
@@ -9,7 +19,6 @@ export function useMessagesLoader({
   activeChatIdRef,
   activeChatTypeRef,
   isActiveChannelChat,
-  isAppActive,
   isMobileViewport,
   mobileTab,
   setMessages,
@@ -43,6 +52,7 @@ export function useMessagesLoader({
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const messageFetchInFlightRef = useRef(false);
   const queuedSilentMessageRefreshRef = useRef(null);
+  const queuedSilentMessageRefreshTimerRef = useRef(null);
   const messageFetchAbortRef = useRef(null);
   const messageFetchRequestIdRef = useRef(0);
   const lastSilentFetchByChatRef = useRef(new Map());
@@ -70,11 +80,48 @@ export function useMessagesLoader({
         messageFetchAbortRef.current.abort();
         messageFetchAbortRef.current = null;
       }
+      if (queuedSilentMessageRefreshTimerRef.current) {
+        window.clearTimeout(queuedSilentMessageRefreshTimerRef.current);
+        queuedSilentMessageRefreshTimerRef.current = null;
+      }
       queuedSilentMessageRefreshRef.current = null;
       messageFetchInFlightRef.current = false;
     },
     [],
   );
+
+  const clearQueuedSilentMessageRefreshTimer = () => {
+    if (!queuedSilentMessageRefreshTimerRef.current) return;
+    window.clearTimeout(queuedSilentMessageRefreshTimerRef.current);
+    queuedSilentMessageRefreshTimerRef.current = null;
+  };
+
+  const runQueuedSilentMessageRefresh = () => {
+    if (messageFetchInFlightRef.current) return;
+    const queued = queuedSilentMessageRefreshRef.current;
+    if (!queued) return;
+    queuedSilentMessageRefreshRef.current = null;
+    clearQueuedSilentMessageRefreshTimer();
+    void loadMessages(queued.chatId, queued.options);
+  };
+
+  const scheduleQueuedSilentMessageRefresh = (delayMs = 0) => {
+    clearQueuedSilentMessageRefreshTimer();
+    queuedSilentMessageRefreshTimerRef.current = window.setTimeout(() => {
+      queuedSilentMessageRefreshTimerRef.current = null;
+      runQueuedSilentMessageRefresh();
+    }, Math.max(0, Number(delayMs || 0)));
+  };
+
+  const queueSilentMessageRefresh = (chatId, options = {}, delayMs = 0) => {
+    queuedSilentMessageRefreshRef.current = {
+      chatId: Number(chatId),
+      options: { ...options, silent: true },
+    };
+    if (!messageFetchInFlightRef.current) {
+      scheduleQueuedSilentMessageRefresh(delayMs);
+    }
+  };
 
   async function loadMessages(chatId, options = {}) {
     const requestChatId = Number(chatId);
@@ -82,14 +129,30 @@ export function useMessagesLoader({
     if (isSilentRefresh) {
       const now = Date.now();
       const lastAt = Number(lastSilentFetchByChatRef.current.get(requestChatId) || 0);
-      if (lastAt && now - lastAt < 320) {
-        queuedSilentMessageRefreshRef.current = {
-          chatId: requestChatId,
-          options: { ...options, silent: true },
-        };
+      const elapsedMs = lastAt ? now - lastAt : SILENT_FETCH_MIN_INTERVAL_MS;
+      if (lastAt && elapsedMs < SILENT_FETCH_MIN_INTERVAL_MS) {
+        queueSilentMessageRefresh(
+          requestChatId,
+          options,
+          SILENT_FETCH_MIN_INTERVAL_MS - elapsedMs,
+        );
         return;
       }
+      clearQueuedSilentMessageRefreshTimer();
       markSilentFetchAt(requestChatId, now);
+    }
+    if (
+      messageFetchInFlightRef.current &&
+      options.silent &&
+      options.preserveHistory &&
+      !options.prepend
+    ) {
+      queueSilentMessageRefresh(chatId, {
+        ...options,
+        silent: true,
+        preserveHistory: true,
+      });
+      return;
     }
     const requestId = messageFetchRequestIdRef.current + 1;
     messageFetchRequestIdRef.current = requestId;
@@ -100,18 +163,6 @@ export function useMessagesLoader({
     messageFetchAbortRef.current = controller;
     if (!options.silent) {
       setLoadingMessages(true);
-    }
-    if (
-      messageFetchInFlightRef.current &&
-      options.silent &&
-      options.preserveHistory &&
-      !options.prepend
-    ) {
-      queuedSilentMessageRefreshRef.current = {
-        chatId: Number(chatId),
-        options: { ...options, silent: true, preserveHistory: true },
-      };
-      return;
     }
     messageFetchInFlightRef.current = true;
     try {
@@ -163,8 +214,7 @@ export function useMessagesLoader({
         const date = parseServerDate(msg.created_at);
         const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
         const readByMe =
-          Number(msg?.user_id || 0) === Number(user.id) ||
-          Boolean(msg.read_by_me);
+          isMessageAuthoredByUser(msg, user) || Boolean(msg.read_by_me);
         const hasProcessingVideo = Array.isArray(msg?.files)
           ? msg.files.some(
               (file) =>
@@ -176,7 +226,7 @@ export function useMessagesLoader({
             )
           : false;
         const isOwnProcessingVideo =
-          hasProcessingVideo && msg.username === user.username;
+          hasProcessingVideo && isMessageAuthoredByUser(msg, user);
         const normalizedBody = normalizeMessageBody(msg?.body);
         const normalizedReply =
           msg?.replyTo && typeof msg.replyTo === "object"
@@ -447,7 +497,7 @@ export function useMessagesLoader({
               _readByMe:
                 Boolean(serverMsg?.read_by_me) ||
                 Boolean(existingLocal?._readByMe) ||
-                Number(serverMsg?.user_id || 0) === Number(user.id),
+                isMessageAuthoredByUser(serverMsg, user),
               read_at: serverMsg.read_at || existingLocal?.read_at || null,
               read_by_user_id:
                 serverMsg.read_by_user_id || existingLocal?.read_by_user_id || null,
@@ -468,8 +518,7 @@ export function useMessagesLoader({
                     .startsWith("video/"),
                 )
               : false;
-            const isFromOther =
-              String(serverMsg?.username || "") !== String(user.username || "");
+            const isFromOther = isMessageFromOtherUser(serverMsg, user);
             const createdAtMs = parseServerDate(
               serverMsg?.created_at,
             ).getTime();
@@ -846,18 +895,18 @@ export function useMessagesLoader({
       const lastMsg = nextMessages[nextMessages.length - 1];
       const lastId = lastMsg?.id || null;
       const hasUnreadFromOthers = nextMessages.some(
-        (msg) => msg.username !== user.username && !msg._readByMe,
+        (msg) => isMessageFromOtherUser(msg, user) && !msg._readByMe,
       );
       const hasNew =
         lastId &&
         lastMessageIdRef.current &&
         lastId !== lastMessageIdRef.current;
-      const newFromSelf = hasNew && lastMsg?.username === user.username;
+      const newFromSelf = hasNew && isMessageAuthoredByUser(lastMsg, user);
       lastMessageIdRef.current = lastId;
 
       if (openingChatRef.current) {
         const firstUnreadIndex = nextMessages.findIndex(
-          (msg) => msg.username !== user.username && !msg._readByMe,
+          (msg) => isMessageFromOtherUser(msg, user) && !msg._readByMe,
         );
         const firstUnreadMessage =
           firstUnreadIndex >= 0 ? nextMessages[firstUnreadIndex] : null;
@@ -954,7 +1003,7 @@ export function useMessagesLoader({
       if (
         activeChat?.type === "dm" &&
         hasUnreadFromOthers &&
-        isAppActive &&
+        isDocumentActive() &&
         (!isMobileViewport || mobileTab === "chat") &&
         isAtBottomRef.current &&
         !userScrolledUpRef.current &&
@@ -975,9 +1024,12 @@ export function useMessagesLoader({
       }
       messageFetchInFlightRef.current = false;
       if (queuedSilentMessageRefreshRef.current) {
-        const queued = queuedSilentMessageRefreshRef.current;
-        queuedSilentMessageRefreshRef.current = null;
-        void loadMessages(queued.chatId, queued.options);
+        const queuedChatId = Number(queuedSilentMessageRefreshRef.current.chatId || 0);
+        const lastAt = Number(lastSilentFetchByChatRef.current.get(queuedChatId) || 0);
+        const remainingMs = lastAt
+          ? Math.max(0, SILENT_FETCH_MIN_INTERVAL_MS - (Date.now() - lastAt))
+          : 0;
+        scheduleQueuedSilentMessageRefresh(remainingMs);
       }
       if (!options.silent) {
         setLoadingMessages(false);

@@ -15,8 +15,16 @@ export function useNewGroupModal({
   const [newGroupForm, setNewGroupForm] = useState({
     nickname: "",
     username: "",
+    groupColor: "#10b981",
     visibility: "public",
     allowMemberInvites: true,
+    remoteChannelEnabled: false,
+    remoteChannelProvider: "telegram",
+    remoteChannelSource: "",
+    remoteChannelSyncMetadata: false,
+    remoteChannelStreamMedia: false,
+    remoteChannelStatus: null,
+    remoteChannelLoading: false,
   });
   const [newGroupSearch, setNewGroupSearch] = useState("");
   const [newGroupSearchResults, setNewGroupSearchResults] = useState([]);
@@ -25,7 +33,7 @@ export function useNewGroupModal({
   const [newGroupError, setNewGroupError] = useState("");
   const [groupInviteOpen, setGroupInviteOpen] = useState(false);
   const [createdGroupInviteLink, setCreatedGroupInviteLink] = useState("");
-  const [editGroupInviteLink, setEditGroupInviteLink] = useState("");
+  const [editGroupInviteToken, setEditGroupInviteToken] = useState("");
   const [regeneratingGroupInviteLink, setRegeneratingGroupInviteLink] =
     useState(false);
 
@@ -117,8 +125,8 @@ export function useNewGroupModal({
     setGroupInviteOpen,
     createdGroupInviteLink,
     setCreatedGroupInviteLink,
-    editGroupInviteLink,
-    setEditGroupInviteLink,
+    editGroupInviteToken,
+    setEditGroupInviteToken,
     regeneratingGroupInviteLink,
     setRegeneratingGroupInviteLink,
   };

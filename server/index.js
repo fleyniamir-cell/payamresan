@@ -20,6 +20,7 @@ import { createMessageFileJobs } from "./lib/messageFileJobs.js";
 import { createInspector } from "./lib/inspect.js";
 import { createSessionHelpers } from "./lib/sessions.js";
 import { storageEncryption } from "./lib/storageEncryption.js";
+import { createRemoteChannelManager } from "./lib/remoteChannels.js";
 import { buildTimestampSchedule } from "./lib/timeUtils.js";
 import { isLoopbackRequest, parseUploadFileMetadata } from "./lib/requestUtils.js";
 import { USER_COLORS, setUserColor } from "./settings/colors.js";
@@ -94,6 +95,21 @@ import {
   listPushSubscriptionsByUserIds,
   getTotalUnreadCount,
   listMutedUserIdsForChat,
+  claimNextRemoteChannelQueueItem,
+  enqueueRemoteChannelQueueItem,
+  getRemoteChannelProviderState,
+  getRemoteChannelQueueSummary,
+  getRemoteChannelSourceByChatId,
+  getRemoteChannelSourceById,
+  listEnabledRemoteChannelSources,
+  markRemoteChannelQueueItemDone,
+  markRemoteChannelQueueItemRetry,
+  markRemoteChannelQueueItemSkipped,
+  releaseStaleRemoteChannelQueueItems,
+  setRemoteChannelProviderState,
+  updateRemoteChannelSourceError,
+  updateRemoteChannelSourceSeen,
+  upsertRemoteChannelSource,
 } from "./db.js";
 
 process.title = "songbird-server";
@@ -101,7 +117,7 @@ process.title = "songbird-server";
 const app = express();
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRootDir = path.resolve(serverDir, "..");
-dotenv.config({ path: path.join(projectRootDir, ".env") });
+dotenv.config({ path: path.join(projectRootDir, ".env"), override: true });
 dotenv.config({ path: path.join(serverDir, ".env"), override: true });
 
 const port = process.env.SERVER_PORT || process.env.PORT || 5174;
@@ -256,6 +272,68 @@ const TRANSCODE_VIDEOS_TO_H264 = readEnvBool(
 );
 
 const FILE_UPLOAD = readEnvBool("FILE_UPLOAD", true);
+const REMOTE_CHANNEL = readEnvBool("REMOTE_CHANNEL", false);
+const REMOTE_CHANNEL_TELEGRAM_API_ID = readEnvInt(
+  "REMOTE_CHANNEL_TELEGRAM_API_ID",
+  0,
+  { min: 1 },
+);
+const REMOTE_CHANNEL_TELEGRAM_API_HASH = String(
+  process.env.REMOTE_CHANNEL_TELEGRAM_API_HASH || "",
+).trim();
+const REMOTE_CHANNEL_TELEGRAM_SESSION_STRING = String(
+  process.env.REMOTE_CHANNEL_TELEGRAM_SESSION_STRING || "",
+).trim();
+const REMOTE_CHANNEL_PROXY_URL = String(
+  process.env.REMOTE_CHANNEL_PROXY_URL || "",
+).trim();
+const REMOTE_CHANNEL_TELEGRAM_CONFIGURED = Boolean(
+  REMOTE_CHANNEL_TELEGRAM_API_ID &&
+    REMOTE_CHANNEL_TELEGRAM_API_HASH &&
+    REMOTE_CHANNEL_TELEGRAM_SESSION_STRING,
+);
+const REMOTE_CHANNEL_CONFIG = {
+  enabled: REMOTE_CHANNEL,
+  telegramConfigured: REMOTE_CHANNEL_TELEGRAM_CONFIGURED,
+  proxyConfigured: Boolean(REMOTE_CHANNEL_PROXY_URL),
+  telegramApiId: REMOTE_CHANNEL_TELEGRAM_API_ID,
+  telegramApiHash: REMOTE_CHANNEL_TELEGRAM_API_HASH,
+  telegramSessionString: REMOTE_CHANNEL_TELEGRAM_SESSION_STRING,
+  proxyUrl: REMOTE_CHANNEL_PROXY_URL,
+  pollIntervalMs: readEnvInt("REMOTE_CHANNEL_POLL_INTERVAL_MS", 5000, {
+    min: 1000,
+  }),
+  telegramPollLimit: readEnvInt("REMOTE_CHANNEL_TELEGRAM_POLL_LIMIT", 50, {
+    min: 1,
+    max: 100,
+  }),
+  queueIntervalMs: readEnvInt("REMOTE_CHANNEL_QUEUE_INTERVAL_MS", 1000, {
+    min: 100,
+  }),
+  queueMaxAttempts: readEnvInt("REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS", 10, {
+    min: 1,
+    max: 100,
+  }),
+  queueBatchSize: readEnvInt("REMOTE_CHANNEL_QUEUE_BATCH_SIZE", 10, {
+    min: 1,
+    max: 50,
+  }),
+  queueStaleLockMs: readEnvInt("REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS", 300000, {
+    min: 10000,
+  }),
+  messageTextRetentionDays: MESSAGE_TEXT_RETENTION_DAYS,
+  messageFileRetentionDays: MESSAGE_FILE_RETENTION_DAYS,
+  messageMaxChars: MESSAGE_MAX_CHARS,
+  fileUploadEnabled: FILE_UPLOAD,
+  messageFileLimits: {
+    maxFiles: FILE_UPLOAD_MAX_FILES,
+    maxFileSizeBytes: FILE_UPLOAD_MAX_SIZE,
+    maxTotalBytes: FILE_UPLOAD_MAX_TOTAL_SIZE,
+  },
+  transcodeVideosToH264: TRANSCODE_VIDEOS_TO_H264,
+  uploadRootDir,
+  avatarUploadRootDir,
+};
 const MESSAGE_FILE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 const uploadTools = createUploadTools({
@@ -454,6 +532,11 @@ const apiDeps = {
   USERNAME_MAX,
   MESSAGE_MAX_CHARS,
   ACCOUNT_CREATION,
+  REMOTE_CHANNELS: {
+    enabled: REMOTE_CHANNEL_CONFIG.enabled,
+    telegramConfigured: REMOTE_CHANNEL_CONFIG.telegramConfigured,
+    proxyConfigured: REMOTE_CHANNEL_CONFIG.proxyConfigured,
+  },
   USERNAME_REGEX,
   VAPID_PUBLIC_KEY: PUSH_ENABLED ? VAPID_PUBLIC_KEY : "",
   addChatMember,
@@ -467,6 +550,7 @@ const apiDeps = {
   bcrypt,
   buildInspectSnapshot,
   buildTimestampSchedule,
+  claimNextRemoteChannelQueueItem,
   chunkArray,
   cleanupMissingMessageFiles,
   clearGroupMemberRemoved,
@@ -488,6 +572,7 @@ const apiDeps = {
   deleteUserById,
   emitChatEvent,
   emitSseEvent,
+  enqueueRemoteChannelQueueItem,
   enqueueVideoTranscodeJob,
   ensureAvatarExists,
   ensureFfmpegAvailable,
@@ -504,6 +589,10 @@ const apiDeps = {
   getMessageAuthors,
   getMessageReadByUser,
   getMessages,
+  getRemoteChannelProviderState,
+  getRemoteChannelQueueSummary,
+  getRemoteChannelSourceByChatId,
+  getRemoteChannelSourceById,
   getSessionFromRequest,
   getUploadKind,
   getUserPresence,
@@ -521,16 +610,21 @@ const apiDeps = {
   listPushSubscriptionsByUserIds,
   listChatMembers,
   listChatsForUser,
+  listEnabledRemoteChannelSources,
   listMessageFilesByMessageIds,
   listUsers,
   setMessageForwardOrigin,
   getChatMemberRole,
   setChatMemberRole,
   recordMessageReads,
+  releaseStaleRemoteChannelQueueItems,
   markChatMemberLeft,
   markGroupMemberRemoved,
   markMessagesRead,
   markMessageRead,
+  markRemoteChannelQueueItemDone,
+  markRemoteChannelQueueItemRetry,
+  markRemoteChannelQueueItemSkipped,
   parseCookies,
   parseUploadFileMetadata,
   path,
@@ -553,6 +647,7 @@ const apiDeps = {
   searchPublicChannels,
   setChatMuted,
   setMessageExpiresAt,
+  setRemoteChannelProviderState,
   listMutedUserIdsForChat,
   setSessionCookie,
   setUserColor,
@@ -560,16 +655,64 @@ const apiDeps = {
   updateGroupChat,
   updateChannelChat,
   unhideChat,
+  updateRemoteChannelSourceError,
+  updateRemoteChannelSourceSeen,
   updateUserPassword,
   updateUserProfile,
   updateUserStatus,
   uploadAvatar,
   uploadFiles,
   uploadRootDir,
+  upsertRemoteChannelSource,
   upsertPushSubscription,
   sendPushNotificationToUsers,
   storageEncryption,
 };
+
+const remoteChannelManager = createRemoteChannelManager({
+  config: REMOTE_CHANNEL_CONFIG,
+  computeExpiryIso,
+  createMessageFiles,
+  createOrReuseMessage,
+  crypto,
+  debugLog,
+  emitChatEvent,
+  emitSseEvent,
+  enqueueVideoTranscodeJob,
+  ensureFfmpegAvailable,
+  findChatById,
+  findUserById,
+  fs,
+  getRemoteChannelProviderState,
+  getRemoteChannelSourceById,
+  getUploadKind,
+  hasEnoughFreeDiskSpace,
+  isDangerousUploadFile,
+  listEnabledRemoteChannelSources,
+  listChatMembers,
+  listMessageFilesByMessageIds,
+  listMutedUserIdsForChat,
+  enqueueRemoteChannelQueueItem,
+  releaseStaleRemoteChannelQueueItems,
+  claimNextRemoteChannelQueueItem,
+  markRemoteChannelQueueItemDone,
+  markRemoteChannelQueueItemRetry,
+  markRemoteChannelQueueItemSkipped,
+  path,
+  probeVideoMetadata,
+  sanitizeDurationSeconds,
+  sanitizePositiveInt,
+  sendPushNotificationToUsers,
+  setMessageExpiresAt,
+  setMessageForwardOrigin,
+  setRemoteChannelProviderState,
+  storageEncryption,
+  updateChannelChat,
+  updateRemoteChannelSourceError,
+  updateRemoteChannelSourceSeen,
+});
+
+apiDeps.remoteChannelManager = remoteChannelManager;
 
 registerApiRoutes(app, apiDeps);
 
@@ -788,6 +931,7 @@ if (MESSAGE_TEXT_RETENTION_DAYS > 0) {
 }
 
 backfillStorageEncryption();
+remoteChannelManager.start();
 
 app.listen(port, () => {
   console.log(`Songbird server running on http://localhost:${port}`);

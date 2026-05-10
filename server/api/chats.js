@@ -1,6 +1,10 @@
+import { createInviteToken } from "../lib/inviteTokens.js";
+import { normalizeTelegramSource } from "../lib/remoteChannels.js";
+
 function registerChatRoutes(app, deps) {
   const {
     USERNAME_REGEX,
+    USER_COLORS,
     addChatMember,
     ALLOWED_AVATAR_MIME_TYPES,
     AVATAR_FILE_LIMITS,
@@ -50,6 +54,10 @@ function registerChatRoutes(app, deps) {
     unhideChat,
     uploadAvatar,
     setChatMemberRole,
+    FILE_UPLOAD,
+    REMOTE_CHANNELS,
+    remoteChannelManager,
+    upsertRemoteChannelSource,
   } = deps;
 
   const resolveClientBaseOrigin = (req) => {
@@ -79,6 +87,132 @@ function registerChatRoutes(app, deps) {
     if (raw.startsWith("/api/uploads/avatars/")) return raw;
     if (raw.startsWith("/uploads/avatars/")) return `/api${raw}`;
     return raw;
+  };
+  const normalizeInviteUsername = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/^@+/, "")
+      .toLowerCase();
+  const decodeInviteTarget = (value) => {
+    const target = String(value || "").trim();
+    try {
+      return decodeURIComponent(target);
+    } catch {
+      return target;
+    }
+  };
+  const isPublicChat = (chat) =>
+    String(chat?.group_visibility || "public").trim().toLowerCase() ===
+    "public";
+  const isRemoteChannelAvailable = () =>
+    Boolean(REMOTE_CHANNELS?.enabled && REMOTE_CHANNELS?.telegramConfigured);
+  const normalizeCreateRemoteChannel = ({
+    remoteChannel,
+    chatType,
+    visibility,
+  }) => {
+    if (
+      chatType !== "channel" ||
+      !remoteChannel ||
+      typeof remoteChannel !== "object"
+    ) {
+      return { shouldSave: false };
+    }
+
+    const enabled = Boolean(remoteChannel.enabled);
+    const rawSource = String(
+      remoteChannel.source || remoteChannel.sourceRaw || "",
+    ).trim();
+    const syncMetadata = enabled && Boolean(remoteChannel.syncMetadata);
+    const streamMedia = enabled && Boolean(FILE_UPLOAD && remoteChannel.streamMedia);
+    const shouldSave = Boolean(
+      enabled || rawSource || syncMetadata || streamMedia,
+    );
+    if (!shouldSave) return { shouldSave: false };
+
+    if (!isRemoteChannelAvailable()) {
+      return {
+        shouldSave: true,
+        error: "Remote Channel is not configured on this server.",
+        status: 503,
+      };
+    }
+    if (enabled && String(visibility || "").toLowerCase() === "private") {
+      return {
+        shouldSave: true,
+        error: "Remote Channel can only be enabled for public channels.",
+        status: 400,
+      };
+    }
+
+    const provider = String(remoteChannel.provider || "telegram").toLowerCase();
+    if (provider !== "telegram") {
+      return {
+        shouldSave: true,
+        error: "Remote Channel source is invalid.",
+        status: 400,
+      };
+    }
+
+    let normalized = {
+      ok: true,
+      sourceRaw: rawSource,
+      sourceChatId: "",
+      sourceUsername: "",
+    };
+    if (enabled) {
+      normalized = normalizeTelegramSource(rawSource);
+      if (!normalized.ok) {
+        return {
+          shouldSave: true,
+          error: normalized.error,
+          status: 400,
+        };
+      }
+    } else if (rawSource) {
+      const optionalNormalized = normalizeTelegramSource(rawSource);
+      if (optionalNormalized.ok) normalized = optionalNormalized;
+    }
+
+    if (enabled && !normalized.sourceChatId && !normalized.sourceUsername) {
+      return {
+        shouldSave: true,
+        error: "Telegram source is required.",
+        status: 400,
+      };
+    }
+
+    return {
+      shouldSave: true,
+      enabled,
+      provider,
+      sourceRaw: normalized.sourceRaw,
+      sourceChatId: normalized.sourceChatId,
+      sourceUsername: normalized.sourceUsername,
+      syncMetadata,
+      streamMedia,
+    };
+  };
+  const buildGroupInviteLink = (baseOrigin, chat, inviteToken) => {
+    const username = normalizeInviteUsername(chat?.group_username);
+    if (isPublicChat(chat) && username) {
+      return `${baseOrigin}/invite/${encodeURIComponent(username)}`;
+    }
+    const token = String(inviteToken ?? chat?.invite_token ?? "").trim();
+    return token ? `${baseOrigin}/invite/${encodeURIComponent(token)}` : "";
+  };
+  const findPublicChatByInviteUsername = (value) => {
+    const username = normalizeInviteUsername(value);
+    if (!username) return null;
+    const chat = findChatByGroupUsername(username);
+    if (!chat || !isPublicChat(chat)) return null;
+    return chat;
+  };
+  const findChatByInviteTarget = (value) => {
+    const target = decodeInviteTarget(value);
+    if (!target) return null;
+    if (target.startsWith("@")) return findPublicChatByInviteUsername(target);
+    return findChatByInviteToken(target) || findPublicChatByInviteUsername(target);
   };
   const emitChatListChangedToChatParticipants = (chatId, extraUsernames = []) => {
     const memberUsernames = listChatMembers(Number(chatId))
@@ -289,7 +423,7 @@ function registerChatRoutes(app, deps) {
     res.json({ id: chatId });
   });
 
-  app.post("/api/chats/group", (req, res) => {
+  app.post("/api/chats/group", async (req, res) => {
     const session = requireSession(req, res);
     if (!session) return;
 
@@ -300,7 +434,10 @@ function registerChatRoutes(app, deps) {
       username,
       visibility,
       allowMemberInvites = true,
+      groupColor,
+      color,
       members = [],
+      remoteChannel = null,
     } = req.body || {};
 
     if (!creator) {
@@ -350,12 +487,30 @@ function registerChatRoutes(app, deps) {
       String(visibility || "").toLowerCase() === "private"
         ? "private"
         : "public";
-    const inviteToken = crypto.randomBytes(24).toString("hex");
+    const remoteChannelConfig = normalizeCreateRemoteChannel({
+      remoteChannel,
+      chatType: normalizedType,
+      visibility: normalizedVisibility,
+    });
+    if (remoteChannelConfig.error) {
+      return res
+        .status(remoteChannelConfig.status || 400)
+        .json({ error: remoteChannelConfig.error });
+    }
+    const suppliedGroupColor = String(groupColor || color || "")
+      .trim()
+      .toLowerCase();
+    const normalizedGroupColor = Array.isArray(USER_COLORS) &&
+      USER_COLORS.includes(suppliedGroupColor)
+      ? suppliedGroupColor
+      : "";
+    const inviteToken = createInviteToken(crypto);
     const chatId = createChat(groupNickname, normalizedType, {
       groupUsername,
       groupVisibility: normalizedVisibility,
       inviteToken,
       createdByUserId: creatorUser.id,
+      groupColor: normalizedGroupColor,
       allowMemberInvites: Boolean(allowMemberInvites),
     });
 
@@ -374,14 +529,49 @@ function registerChatRoutes(app, deps) {
       const member = findUserByUsername(memberUsername);
       if (member) addChatMember(chatId, member.id, "member");
     });
+
+    if (remoteChannelConfig.shouldSave) {
+      let remoteSource = null;
+      try {
+        remoteSource = upsertRemoteChannelSource({
+          chatId,
+          provider: remoteChannelConfig.provider,
+          sourceRaw: remoteChannelConfig.sourceRaw,
+          sourceChatId: remoteChannelConfig.sourceChatId,
+          sourceUsername: remoteChannelConfig.sourceUsername,
+          syncMetadata: remoteChannelConfig.syncMetadata,
+          streamMedia: remoteChannelConfig.streamMedia,
+          enabled: remoteChannelConfig.enabled,
+        });
+        if (
+          remoteChannelConfig.enabled &&
+          remoteChannelConfig.syncMetadata &&
+          typeof remoteChannelManager?.syncSourceMetadata === "function"
+        ) {
+          await remoteChannelManager.syncSourceMetadata(remoteSource.id);
+        }
+      } catch (error) {
+        deleteChatById(chatId);
+        return res.status(400).json({
+          error: remoteChannelConfig.syncMetadata
+            ? `Unable to sync Telegram metadata: ${
+                error?.message || "Unknown error"
+              }`
+            : error?.message || "Unable to configure Remote Channel.",
+        });
+      }
+    }
+
     emitChatListChangedToChatParticipants(chatId);
 
+    const createdChat = findChatById(chatId);
     const baseOrigin = resolveClientBaseOrigin(req);
-    const inviteLink = `${baseOrigin}/invite/${inviteToken}`;
+    const inviteLink = buildGroupInviteLink(baseOrigin, createdChat, inviteToken);
     return res.json({
       id: Number(chatId),
       inviteToken,
       inviteLink,
+      color: createdChat?.group_color || normalizedGroupColor || "#10b981",
       visibility: normalizedVisibility,
     });
   });
@@ -390,12 +580,12 @@ function registerChatRoutes(app, deps) {
     const session = requireSession(req, res);
     if (!session) return;
 
-    const token = String(req.params?.token || "").trim();
-    if (!token) {
-      return res.status(400).json({ error: "Invite token is required." });
+    const target = String(req.params?.token || "").trim();
+    if (!target) {
+      return res.status(400).json({ error: "Invite link is required." });
     }
 
-    const chat = findChatByInviteToken(token);
+    const chat = findChatByInviteTarget(target);
     if (!chat) {
       return res.status(404).json({ error: "Invite link is invalid." });
     }
@@ -431,16 +621,16 @@ function registerChatRoutes(app, deps) {
     const session = requireSession(req, res);
     if (!session) return;
 
-    const token = String(req.params?.token || "").trim();
+    const target = String(req.params?.token || "").trim();
     const suppliedUsername = req.body?.username?.toString();
     if (suppliedUsername && !requireSessionUsernameMatch(res, session, suppliedUsername)) {
       return;
     }
-    if (!token) {
-      return res.status(400).json({ error: "Invite token is required." });
+    if (!target) {
+      return res.status(400).json({ error: "Invite link is required." });
     }
 
-    const chat = findChatByInviteToken(token);
+    const chat = findChatByInviteTarget(target);
     if (!chat) {
       return res.status(404).json({ error: "Invite link is invalid." });
     }
@@ -567,7 +757,7 @@ function registerChatRoutes(app, deps) {
 
     return res.json({
       inviteToken: chat.invite_token || "",
-      inviteLink: `${baseOrigin}/invite/${chat.invite_token}`,
+      inviteLink: buildGroupInviteLink(baseOrigin, chat),
       allowMemberInvites,
       isOwner,
     });
@@ -605,13 +795,13 @@ function registerChatRoutes(app, deps) {
         .json({ error: `Only ${label} owner can regenerate invite link.` });
     }
 
-    const inviteToken = crypto.randomBytes(24).toString("hex");
+    const inviteToken = createInviteToken(crypto);
     regenerateGroupInviteToken(chatId, inviteToken);
     const baseOrigin = resolveClientBaseOrigin(req);
     return res.json({
       ok: true,
       inviteToken,
-      inviteLink: `${baseOrigin}/invite/${inviteToken}`,
+      inviteLink: buildGroupInviteLink(baseOrigin, chat, inviteToken),
     });
   });
 
@@ -734,10 +924,13 @@ function registerChatRoutes(app, deps) {
     });
 
     const updated = findChatById(chatId);
+    const baseOrigin = resolveClientBaseOrigin(req);
     emitChatListChangedToChatParticipants(chatId);
     return res.json({
       ok: true,
       group: updated,
+      inviteToken: updated?.invite_token || "",
+      inviteLink: buildGroupInviteLink(baseOrigin, updated),
     });
   });
 

@@ -6,6 +6,7 @@ import AppContextMenu from "../components/context-menu/AppContextMenu.jsx";
 import { useAppContextMenu } from "../components/context-menu/useAppContextMenu.js";
 import { CHAT_PAGE_CONFIG } from "../settings/chatPageConfig.js";
 import { getAvatarInitials } from "../utils/avatarInitials.js";
+import { getRandomAvatarColor } from "../utils/avatarColor.js";
 import { NICKNAME_MAX, USERNAME_MAX } from "../utils/nameLimits.js";
 import { resolveReplyPreview, summarizeFiles, truncateText } from "../utils/messagePreview.js";
 import {
@@ -57,6 +58,11 @@ import {
 } from "../utils/chatCache.js";
 import { getMessageFiles } from "../utils/messageContent.js";
 import {
+  isMessageAuthoredByUser,
+  isMessageFromOtherUser,
+  isRemoteChannelMessage,
+} from "../utils/messageOwnership.js";
+import {
   createDmChat,
   discoverUsersAndGroups,
   createChannelChat,
@@ -87,8 +93,10 @@ import {
   removeGroupAvatar,
   regenerateGroupInviteLink,
   setChatMute,
+  getRemoteChannelSettings,
   updateChannelChat,
   getMessageReadCounts,
+  updateRemoteChannelSettings,
   updateGroupChat,
   uploadGroupAvatar,
   getSavedMessagesChat,
@@ -275,7 +283,39 @@ const patchChatAndMoveToFront = (chats, chatId, updateChat) => {
   return nextChats;
 };
 
- 
+const normalizeInviteUsername = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+
+const buildInvitePathForChat = (chat) => {
+  const visibility = String(
+    chat?.group_visibility || chat?.visibility || "public",
+  )
+    .trim()
+    .toLowerCase();
+  const username = normalizeInviteUsername(
+    chat?.group_username || chat?.username,
+  );
+  if (visibility === "public" && username) {
+    return `/invite/${encodeURIComponent(username)}`;
+  }
+  const token = String(chat?.inviteToken || chat?.invite_token || "").trim();
+  return token ? `/invite/${encodeURIComponent(token)}` : "";
+};
+
+const getInviteOrigin = () => {
+  if (typeof window === "undefined") return "";
+  return String(window.location?.origin || "").replace(/\/+$/, "");
+};
+
+const buildInviteLinkForChat = (chat) => {
+  const path = buildInvitePathForChat(chat);
+  if (!path) return "";
+  const origin = getInviteOrigin();
+  return origin ? `${origin}${path}` : path;
+};
 
 export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme }) {
   /* eslint-disable react-hooks/exhaustive-deps */
@@ -703,8 +743,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setGroupInviteOpen,
     createdGroupInviteLink,
     setCreatedGroupInviteLink,
-    editGroupInviteLink,
-    setEditGroupInviteLink,
+    editGroupInviteToken,
+    setEditGroupInviteToken,
     regeneratingGroupInviteLink,
     setRegeneratingGroupInviteLink,
   } = useNewGroupModal({
@@ -1230,6 +1270,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         last_sender_username: user.username,
         last_sender_nickname: user.nickname || user.username,
         last_sender_avatar_url: user.avatarUrl || "",
+        last_message_client_request_id: null,
         last_message_read_at: null,
       }));
     });
@@ -1249,10 +1290,14 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     if (messageRefreshTimerRef.current) {
       window.clearTimeout(messageRefreshTimerRef.current);
     }
+    const { delayMs, ...loadOptions } = options;
+    const refreshDelayMs = Number.isFinite(Number(delayMs))
+      ? Math.max(0, Number(delayMs))
+      : 280;
     messageRefreshTimerRef.current = window.setTimeout(() => {
       messageRefreshTimerRef.current = null;
-      void loadMessages(chatId, { silent: true, preserveHistory: true, ...options });
-    }, 280);
+      void loadMessages(chatId, { silent: true, preserveHistory: true, ...loadOptions });
+    }, refreshDelayMs);
   };
 
   const fileUploadInProgress = useMemo(
@@ -1768,7 +1813,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     activeChatIdRef,
     activeChatTypeRef,
     isActiveChannelChat,
-    isAppActive,
     isMobileViewport,
     mobileTab,
     setMessages,
@@ -2712,8 +2756,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const canEditMessageFromContext = useCallback(
     (message) =>
       (!isActiveChannelChat || canCurrentUserEditGroup) &&
-      String(message?.username || "").toLowerCase() ===
-        String(user?.username || "").toLowerCase(),
+      isMessageAuthoredByUser(message, { username: user?.username }),
     [canCurrentUserEditGroup, isActiveChannelChat, user?.username],
   );
 
@@ -3111,11 +3154,15 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   useEffect(() => {
     const activeId = activeChatIdRef.current;
+    const isDocumentActiveNow =
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible" &&
+      document.hasFocus();
     if (
       !activeId ||
       !user?.username ||
       isMarkingReadRef.current ||
-      !isAppActive ||
+      !isDocumentActiveNow ||
       !canMarkReadInCurrentView ||
       !isAtBottomRef.current ||
       userScrolledUpRef.current
@@ -3123,7 +3170,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       return;
     }
     const hasUnreadFromOthers = messages.some(
-      (msg) => msg.username !== user.username && !msg._readByMe,
+      (msg) =>
+        isMessageFromOtherUser(msg, { username: user?.username }) &&
+        !msg._readByMe,
     );
     if (!hasUnreadFromOthers) return;
 
@@ -3271,7 +3320,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setMessages,
     setChats,
     sseReconnectRef,
-    isAppActive,
     canMarkReadInCurrentView,
     markMessageRead,
     markMessagesRead,
@@ -3287,10 +3335,12 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       if (!notificationsActive) return;
       const senderName = String(payload?.username || "").trim();
       const isOwnEvent =
-        senderName.toLowerCase() === String(user?.username || "").toLowerCase();
+        senderName.toLowerCase() === String(user?.username || "").toLowerCase() &&
+        !isRemoteChannelMessage(payload);
       if (isOwnEvent) return;
-      if (document.visibilityState !== "visible") return;
-      if (document.hasFocus()) return;
+      const pageFocused =
+        document.visibilityState === "visible" && document.hasFocus();
+      if (pageFocused) return;
       const chat = chats.find((conv) => Number(conv.id) === payloadChatId);
       if (chat?._muted) return;
       let title = "New message";
@@ -3996,7 +4046,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   useEffect(() => {
     if (!activeChatId || !isAppActive) return;
     const needsMediaSync = messages.some((msg) => {
-      const isOwn = msg.username === user.username;
+      const isOwn = isMessageAuthoredByUser(msg, { username: user.username });
       if (!isOwn) return false;
       const hasFiles = Array.isArray(msg.files) ? msg.files.length > 0 : false;
       if (!hasFiles) return false;
@@ -4065,6 +4115,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       const queued = {
         silent: Boolean(options.silent),
         showUpdating: Boolean(options.showUpdating),
+        preserveActiveUnread: Boolean(options.preserveActiveUnread),
       };
       if (queuedLoadChatsOptionsRef.current) {
         queuedLoadChatsOptionsRef.current = {
@@ -4072,6 +4123,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             queuedLoadChatsOptionsRef.current.silent && queued.silent,
           showUpdating:
             queuedLoadChatsOptionsRef.current.showUpdating || queued.showUpdating,
+          preserveActiveUnread:
+            queuedLoadChatsOptionsRef.current.preserveActiveUnread ||
+            queued.preserveActiveUnread,
         };
       } else {
         queuedLoadChatsOptionsRef.current = queued;
@@ -4164,6 +4218,13 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           .map((chat) => {
             const isActiveChat =
               Number(activeChatIdRef.current || 0) === Number(chat?.id || 0);
+            const canClearActiveUnread =
+              isActiveChat &&
+              !options.preserveActiveUnread &&
+              canMarkReadInCurrentView &&
+              typeof document !== "undefined" &&
+              document.visibilityState === "visible" &&
+              document.hasFocus();
             const muted = Boolean(Number(chat?.muted || 0));
             const files = Array.isArray(chat?.last_message_files)
               ? chat.last_message_files
@@ -4174,26 +4235,36 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
                 file?.processing === true &&
                 !String(file?.url || "").includes("-h264-"),
             );
-            const lastSender = String(chat?.last_sender_username || "").toLowerCase();
-            const isFromSelf =
-              lastSender &&
-              lastSender === String(user.username || "").toLowerCase();
-            const isFromOther =
-              lastSender &&
-              lastSender !== String(user.username || "").toLowerCase();
+            const lastMessageIdentity = {
+              username: chat?.last_sender_username,
+              client_request_id: chat?.last_message_client_request_id,
+            };
+            const userIdentity = { username: user.username };
+            const isFromSelf = isMessageAuthoredByUser(
+              lastMessageIdentity,
+              userIdentity,
+            );
+            const isFromOther = isMessageFromOtherUser(
+              lastMessageIdentity,
+              userIdentity,
+            );
             if (hasProcessingVideo && isFromSelf) {
               return {
                 ...chat,
                 _lastMessagePending: true,
                 last_message_read_at: null,
-                unread_count: isActiveChat ? 0 : Number(chat?.unread_count || 0),
+                unread_count: canClearActiveUnread
+                  ? 0
+                  : Number(chat?.unread_count || 0),
                 _muted: muted,
               };
             }
             if (!hasProcessingVideo || !isFromOther) {
               return {
                 ...chat,
-                unread_count: isActiveChat ? 0 : Number(chat?.unread_count || 0),
+                unread_count: canClearActiveUnread
+                  ? 0
+                  : Number(chat?.unread_count || 0),
                 _muted: muted,
               };
             }
@@ -4203,7 +4274,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             if (!previous) {
               return {
                 ...chat,
-                unread_count: 0,
+                unread_count: canClearActiveUnread
+                  ? 0
+                  : Number(chat?.unread_count || 0),
                 _muted: muted,
               };
             }
@@ -4219,7 +4292,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
               last_message_read_at:
                 previous.last_message_read_at ?? chat.last_message_read_at ?? null,
               last_message_files: previous.last_message_files || [],
-              unread_count: isActiveChat ? 0 : previous.unread_count || 0,
+              unread_count: canClearActiveUnread
+                ? 0
+                : Number(chat?.unread_count || previous.unread_count || 0),
               _muted: muted,
             };
           })
@@ -5230,15 +5305,25 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   };
 
   const openNewGroupModal = () => {
+    const groupColor = getRandomAvatarColor();
     setEditingGroup(false);
     setGroupModalType("group");
+    setNewGroupForm((prev) => ({
+      ...prev,
+      groupColor,
+    }));
     setNewGroupOpen(true);
     setNewGroupError("");
   };
 
   const openNewChannelModal = () => {
+    const groupColor = getRandomAvatarColor();
     setEditingGroup(false);
     setGroupModalType("channel");
+    setNewGroupForm((prev) => ({
+      ...prev,
+      groupColor,
+    }));
     setNewGroupOpen(true);
     setNewGroupError("");
   };
@@ -5251,8 +5336,16 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setNewGroupForm({
       nickname: "",
       username: "",
+      groupColor: "#10b981",
       visibility: "public",
       allowMemberInvites: true,
+      remoteChannelEnabled: false,
+      remoteChannelProvider: "telegram",
+      remoteChannelSource: "",
+      remoteChannelSyncMetadata: false,
+      remoteChannelStreamMedia: false,
+      remoteChannelStatus: null,
+      remoteChannelLoading: false,
     });
     setNewGroupSearch("");
     setNewGroupSearchResults([]);
@@ -5263,7 +5356,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setPendingGroupAvatarFile(null);
     setGroupAvatarPreview("");
     setGroupAvatarMarkedForRemoval(false);
-    setEditGroupInviteLink("");
+    setEditGroupInviteToken("");
     setRegeneratingGroupInviteLink(false);
     setNewGroupError("");
   };
@@ -5332,10 +5425,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   const handleJoinMentionChat = async () => {
     if (!mentionProfileChat?.id) return;
-    const token = String(mentionProfileChat.inviteToken || "").trim();
-    if (!token) return;
+    const invitePath = buildInvitePathForChat(mentionProfileChat);
+    if (!invitePath) return;
     if (typeof window !== "undefined") {
-      window.location.href = `/invite/${token}`;
+      window.location.href = invitePath;
     }
   };
 
@@ -5439,8 +5532,16 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setNewGroupForm({
       nickname: activeChat.name || "",
       username: activeChat.group_username || "",
+      groupColor: activeChat.group_color || "#10b981",
       visibility: activeChat.group_visibility || "public",
       allowMemberInvites: Boolean(Number(activeChat.allow_member_invites || 0)),
+      remoteChannelEnabled: false,
+      remoteChannelProvider: "telegram",
+      remoteChannelSource: "",
+      remoteChannelSyncMetadata: false,
+      remoteChannelStreamMedia: false,
+      remoteChannelStatus: null,
+      remoteChannelLoading: activeChat.type === "channel" && Boolean(appInfo?.remoteChannels?.enabled),
     });
     setNewGroupMembers([]);
     setNewGroupSearch("");
@@ -5450,20 +5551,70 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       URL.revokeObjectURL(pendingGroupAvatarFile.previewUrl);
     }
     setPendingGroupAvatarFile(null);
-    setEditGroupInviteLink("");
+    setEditGroupInviteToken(
+      String(activeChat.inviteToken || activeChat.invite_token || ""),
+    );
     setNewGroupOpen(true);
     try {
       const res = await getGroupInviteLink(activeChat.id);
       const data = await res.json();
       if (res.ok) {
-        setEditGroupInviteLink(String(data?.inviteLink || ""));
+        setEditGroupInviteToken(String(data?.inviteToken || ""));
       }
     } catch {
       // ignore invite fetch errors in edit modal
     }
+    if (activeChat.type === "channel" && appInfo?.remoteChannels?.enabled) {
+      try {
+        const res = await getRemoteChannelSettings({
+          chatId: activeChat.id,
+          username: user.username,
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const source = data?.source || null;
+          setNewGroupForm((prev) => ({
+            ...prev,
+            remoteChannelEnabled: Boolean(source?.enabled),
+            remoteChannelProvider: source?.provider || "telegram",
+            remoteChannelSource:
+              source?.sourceRaw ||
+              (source?.sourceUsername ? `@${source.sourceUsername}` : "") ||
+              source?.sourceChatId ||
+              "",
+            remoteChannelSyncMetadata: Boolean(source?.syncMetadata),
+            remoteChannelStreamMedia:
+              CHAT_PAGE_CONFIG.fileUploadEnabled && Boolean(source?.streamMedia),
+            remoteChannelStatus: data,
+            remoteChannelLoading: false,
+          }));
+        } else {
+          setNewGroupForm((prev) => ({
+            ...prev,
+            remoteChannelStatus: {
+              available: false,
+              source: null,
+              error: data?.error || "Unable to load Remote Channel settings.",
+            },
+            remoteChannelLoading: false,
+          }));
+        }
+      } catch {
+        setNewGroupForm((prev) => ({
+          ...prev,
+          remoteChannelStatus: {
+            available: false,
+            source: null,
+            error: "Unable to load Remote Channel settings.",
+          },
+          remoteChannelLoading: false,
+        }));
+      }
+    }
   };
 
   const handleGroupAvatarChange = (event) => {
+    const label = groupModalType === "channel" ? "Channel" : "Group";
     if (!CHAT_PAGE_CONFIG.fileUploadEnabled) {
       setNewGroupError("File uploads are disabled on this server.");
       event.target.value = "";
@@ -5472,13 +5623,13 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     const file = event.target.files?.[0];
     if (!file) return;
     if (!String(file.type || "").toLowerCase().startsWith("image/")) {
-      setNewGroupError("Group avatar must be an image file.");
+      setNewGroupError(`${label} avatar must be an image file.`);
       event.target.value = "";
       return;
     }
     if (Number(file.size || 0) > CHAT_PAGE_CONFIG.maxFileSizeBytes) {
       setNewGroupError(
-        `Group avatar must be smaller than ${formatBytesAsMb(
+        `${label} avatar must be smaller than ${formatBytesAsMb(
           CHAT_PAGE_CONFIG.maxFileSizeBytes,
         )}.`,
       );
@@ -5520,7 +5671,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         throw new Error(data?.error || "Unable to regenerate invite link.");
       }
       const nextLink = String(data?.inviteLink || "");
-      setEditGroupInviteLink(nextLink);
+      setEditGroupInviteToken(String(data?.inviteToken || ""));
       setProfileInviteLink(nextLink);
     } catch (err) {
       setNewGroupError(err.message || "Unable to regenerate invite link.");
@@ -5556,6 +5707,34 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       );
       return;
     }
+    const remoteChannelSource = String(
+      newGroupForm.remoteChannelSource || "",
+    ).trim();
+    const remoteChannelEnabled =
+      newGroupForm.visibility !== "private" &&
+      Boolean(newGroupForm.remoteChannelEnabled);
+    const remoteChannelProvider = String(
+      newGroupForm.remoteChannelProvider || "telegram",
+    ).toLowerCase();
+    const remoteChannelSyncMetadata =
+      remoteChannelEnabled && Boolean(newGroupForm.remoteChannelSyncMetadata);
+    const remoteChannelStreamMedia =
+      remoteChannelEnabled &&
+      CHAT_PAGE_CONFIG.fileUploadEnabled &&
+      Boolean(newGroupForm.remoteChannelStreamMedia);
+    const shouldSaveRemoteChannel = Boolean(
+      isChannel &&
+        appInfo?.remoteChannels?.enabled &&
+        (editingGroup ||
+          remoteChannelEnabled ||
+          remoteChannelSource ||
+          remoteChannelSyncMetadata ||
+          remoteChannelStreamMedia),
+    );
+    if (shouldSaveRemoteChannel && remoteChannelEnabled && !remoteChannelSource) {
+      setNewGroupError("Remote Channel source is required.");
+      return;
+    }
     try {
       setCreatingGroup(true);
       setNewGroupError("");
@@ -5563,8 +5742,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         creator: user.username,
         nickname,
         username,
+        groupColor: newGroupForm.groupColor || "#10b981",
         visibility: newGroupForm.visibility,
-        allowMemberInvites: newGroupForm.allowMemberInvites !== false,
+        allowMemberInvites:
+          newGroupForm.visibility !== "private" ||
+          newGroupForm.allowMemberInvites !== false,
         members: editingGroup
           ? Array.from(
               new Set([
@@ -5582,6 +5764,15 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             )
           : newGroupMembers.map((member) => member.username),
       };
+      if (!editingGroup && shouldSaveRemoteChannel) {
+        payload.remoteChannel = {
+          enabled: remoteChannelEnabled,
+          provider: remoteChannelProvider,
+          source: remoteChannelSource,
+          syncMetadata: remoteChannelSyncMetadata,
+          streamMedia: remoteChannelStreamMedia,
+        };
+      }
       const res = editingGroup && activeChat?.id
         ? await (isChannel ? updateChannelChat : updateGroupChat)(activeChat.id, {
             username: user.username,
@@ -5600,14 +5791,16 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       if (!nextChatId) {
         throw new Error("Server did not return a group id.");
       }
-      if (editingGroup && pendingGroupAvatarFile?.file) {
+      if (pendingGroupAvatarFile?.file) {
         const form = new FormData();
         form.append("username", user.username);
         form.append("avatar", pendingGroupAvatarFile.file);
         const avatarRes = await uploadGroupAvatar(nextChatId, form);
         const avatarData = await avatarRes.json();
         if (!avatarRes.ok) {
-          throw new Error(avatarData?.error || "Unable to upload group avatar.");
+          throw new Error(
+            avatarData?.error || `Unable to upload ${label.toLowerCase()} avatar.`,
+          );
         }
       } else if (editingGroup && groupAvatarMarkedForRemoval) {
         const avatarRes = await removeGroupAvatar(nextChatId, {
@@ -5616,6 +5809,20 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         const avatarData = await avatarRes.json();
         if (!avatarRes.ok) {
           throw new Error(avatarData?.error || "Unable to remove group avatar.");
+        }
+      }
+      if (shouldSaveRemoteChannel && editingGroup) {
+        const remoteRes = await updateRemoteChannelSettings(nextChatId, {
+          username: user.username,
+          enabled: remoteChannelEnabled,
+          provider: remoteChannelProvider,
+          source: remoteChannelSource,
+          syncMetadata: remoteChannelSyncMetadata,
+          streamMedia: remoteChannelStreamMedia,
+        });
+        const remoteData = await remoteRes.json();
+        if (!remoteRes.ok) {
+          throw new Error(remoteData?.error || "Unable to update Remote Channel.");
         }
       }
       if (!editingGroup) {
@@ -5690,8 +5897,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   }
 
   async function openDiscoverGroup(group) {
-    const inviteToken = String(group?.inviteToken || "").trim();
     const chatId = Number(group?.id || 0);
+    const invitePath = buildInvitePathForChat(group);
     const alreadyMember =
       group?.isMember === true ||
       group?.isMember === 1 ||
@@ -5707,10 +5914,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       setSidebarScrollEpoch((prev) => prev + 1);
       return;
     }
-    if (!inviteToken) return;
+    if (!invitePath) return;
     try {
       if (typeof window !== "undefined") {
-        window.history.pushState({}, "", `/invite/${inviteToken}`);
+        window.history.pushState({}, "", invitePath);
         window.dispatchEvent(new PopStateEvent("popstate"));
       }
     } catch (err) {
@@ -5935,6 +6142,18 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const showPermissionsPrompt = Boolean(
     activePermissionPrompt && !permissionPromptDelayActive,
   );
+  const displayedGroupInviteToken =
+    editingGroup
+      ? editGroupInviteToken ||
+        String(activeChat?.inviteToken || activeChat?.invite_token || "")
+      : "";
+  const displayedGroupInviteLink = buildInviteLinkForChat({
+    group_username: newGroupForm.username,
+    group_visibility: newGroupForm.visibility,
+    inviteToken: displayedGroupInviteToken,
+    invite_token: displayedGroupInviteToken,
+  });
+  const showGroupInviteManagement = Boolean(editingGroup);
 
   useEffect(() => {
     if (!permissionPromptDelayUntil) return undefined;
@@ -6287,7 +6506,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             }
             submitLabel={editingGroup ? "Save" : "Create"}
             avatarPreview={groupAvatarPreview}
-            avatarColor={editingGroup ? activeChat?.group_color || "#10b981" : "#10b981"}
+            avatarColor={
+              editingGroup
+                ? activeChat?.group_color || "#10b981"
+                : newGroupForm.groupColor || "#10b981"
+            }
             avatarName={
               newGroupForm.nickname ||
               newGroupForm.username ||
@@ -6295,13 +6518,17 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             }
             onAvatarChange={handleGroupAvatarChange}
             onAvatarRemove={handleGroupAvatarRemove}
-            showAvatarField={editingGroup}
+            showAvatarField
             hideSelectedMemberChips={false}
             fileUploadEnabled={CHAT_PAGE_CONFIG.fileUploadEnabled}
-            showInviteManagement={editingGroup}
-            currentInviteLink={editGroupInviteLink}
+            showInviteManagement={showGroupInviteManagement}
+            currentInviteLink={displayedGroupInviteLink}
             regeneratingInviteLink={regeneratingGroupInviteLink}
-            onRegenerateInvite={handleRegenerateGroupInvite}
+            onRegenerateInvite={editingGroup ? handleRegenerateGroupInvite : null}
+            showRemoteChannelSettings={Boolean(
+              groupModalType === "channel",
+            )}
+            remoteChannelAvailable={Boolean(appInfo?.remoteChannels?.enabled)}
             entityLabel={groupModalType === "channel" ? "Channel" : "Group"}
             onDeleteChat={editingGroup ? handleDeleteActiveGroup : null}
           />

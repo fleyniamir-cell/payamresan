@@ -638,12 +638,15 @@ function createRemoteChannelManager(deps = {}) {
   let queueLoopRunning = false;
   let queueTimer = null;
   let client = null;
+  let clientConnectPromise = null;
+  let clientResetRequired = false;
+  let clientResetReason = "";
   let lastProviderStateSavedAt = 0;
 
   const log = (...args) => debugLog("remote-channel", ...args);
 
   function createClient() {
-    return new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
+    const telegramClient = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
       connectionRetries: 10,
       reconnectRetries: 10,
       retryDelay: 2000,
@@ -653,15 +656,123 @@ function createRemoteChannelManager(deps = {}) {
       systemVersion: "Songbird Server",
       appVersion: "1.0",
     });
+    telegramClient.onError = async (error) => {
+      if (telegramClient !== client) return;
+      markTelegramClientForReset(error, "client:error");
+    };
+    return telegramClient;
   }
 
-  async function ensureClient() {
+  function isTelegramConnectionError(error) {
+    const message = errorMessage(error).toLowerCase();
+    const code = String(error?.code || "").toLowerCase();
+    return (
+      [
+        "timeout",
+        "cannot send requests while disconnected",
+        "please reconnect",
+        "maximum reconnection retries",
+        "connection closed",
+        "connection reset",
+        "connection refused",
+        "not connected",
+        "netsocket was closed",
+        "socket closed",
+        "econnreset",
+        "econnrefused",
+        "etimedout",
+        "enotfound",
+        "ehostunreach",
+        "enetunreach",
+      ].some((needle) => message.includes(needle) || code.includes(needle))
+    );
+  }
+
+  function telegramClientStatus(activeClient = client) {
+    const sender = activeClient?._sender;
+    return {
+      connected: Boolean(activeClient?.connected),
+      reconnecting: Boolean(sender?.isReconnecting),
+      userDisconnected: Boolean(sender?.userDisconnected),
+      transportConnected:
+        typeof sender?._transportConnected === "function"
+          ? Boolean(sender._transportConnected())
+          : Boolean(activeClient?.connected),
+    };
+  }
+
+  function shouldResetTelegramClient(activeClient = client) {
+    if (!activeClient) return false;
+    if (clientResetRequired) return true;
+    const status = telegramClientStatus(activeClient);
+    if (status.userDisconnected) return true;
+    if (status.connected && !status.reconnecting && !status.transportConnected) {
+      return true;
+    }
+    return false;
+  }
+
+  function markTelegramClientForReset(error, context = "client") {
+    if (!isTelegramConnectionError(error)) return false;
+    const message = errorMessage(error);
+    clientResetRequired = true;
+    clientResetReason = `${context}: ${message}`;
+    log("client:reset-marked", {
+      context,
+      error: message,
+      status: telegramClientStatus(),
+    });
+    return true;
+  }
+
+  async function destroyTelegramClient(activeClient, reason = "reset") {
+    if (!activeClient) return;
+    try {
+      const disconnect =
+        typeof activeClient.destroy === "function"
+          ? () => activeClient.destroy()
+          : () => activeClient.disconnect();
+      await disconnect();
+    } catch (error) {
+      log("client:destroy-error", {
+        reason,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  async function resetTelegramClient(reason = "reset") {
+    const staleClient = client;
+    client = null;
+    clientResetRequired = false;
+    clientResetReason = "";
+    entityCache.clear();
+    if (staleClient) {
+      log("client:reset", { reason });
+      await destroyTelegramClient(staleClient, reason);
+    }
+  }
+
+  async function connectTelegramClient() {
     if (!client) {
       client = createClient();
     }
+
+    if (shouldResetTelegramClient(client)) {
+      await resetTelegramClient(clientResetReason || "unhealthy client state");
+      client = createClient();
+    }
+
     if (!client.connected) {
       await client.connect();
     }
+
+    if (shouldResetTelegramClient(client)) {
+      await resetTelegramClient(clientResetReason || "disconnected after connect");
+      client = createClient();
+      await client.connect();
+    }
+
     const authorized =
       typeof client.isUserAuthorized === "function"
         ? await client.isUserAuthorized()
@@ -669,7 +780,33 @@ function createRemoteChannelManager(deps = {}) {
     if (!authorized) {
       throw new Error("Telegram session is not authorized.");
     }
+    if (shouldResetTelegramClient(client)) {
+      throw new Error(
+        clientResetReason || "Telegram connection needs reconnect. Please reconnect.",
+      );
+    }
     return client;
+  }
+
+  async function ensureClient() {
+    if (!clientConnectPromise) {
+      clientConnectPromise = (async () => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            return await connectTelegramClient();
+          } catch (error) {
+            if (!isTelegramConnectionError(error) || attempt > 0) {
+              throw error;
+            }
+            await resetTelegramClient(`connect failed: ${errorMessage(error)}`);
+          }
+        }
+        throw new Error("Unable to connect to Telegram.");
+      })().finally(() => {
+        clientConnectPromise = null;
+      });
+    }
+    return clientConnectPromise;
   }
 
   async function cacheSourceAvatar(activeClient, source, entity) {
@@ -801,6 +938,7 @@ function createRemoteChannelManager(deps = {}) {
     } catch (error) {
       const message = errorMessage(error);
       updateRemoteChannelSourceError(source.id, message);
+      markTelegramClientForReset(error, "sync-source-metadata");
       throw error;
     }
   }
@@ -911,6 +1049,9 @@ function createRemoteChannelManager(deps = {}) {
         const message = errorMessage(error);
         updateRemoteChannelSourceError(source.id, message);
         log("poll-source:error", { sourceId: Number(source.id), error: message });
+        if (markTelegramClientForReset(error, "poll-source")) {
+          throw error;
+        }
       }
     }
 
@@ -1255,6 +1396,9 @@ function createRemoteChannelManager(deps = {}) {
       return { file: normalized, filePath };
     } catch (error) {
       safeUnlink(filePath);
+      if (isTelegramConnectionError(error)) {
+        throw error;
+      }
       log("media:skip", {
         messageId: normalizeMessageId(message?.id),
         error: errorMessage(error),
@@ -1593,6 +1737,7 @@ function createRemoteChannelManager(deps = {}) {
         error: message,
       });
       updateRemoteChannelSourceError(item.source_id, message);
+      markTelegramClientForReset(error, "queue");
       log("queue:error", { id: Number(item.id), failed, error: message });
     }
   }
@@ -1643,12 +1788,16 @@ function createRemoteChannelManager(deps = {}) {
 
   function stop() {
     stopped = true;
+    clientResetRequired = false;
+    clientResetReason = "";
     if (queueTimer) {
       clearInterval(queueTimer);
       queueTimer = null;
     }
     if (client) {
-      void client.disconnect().catch(() => {});
+      const staleClient = client;
+      client = null;
+      void destroyTelegramClient(staleClient, "stop");
     }
   }
 

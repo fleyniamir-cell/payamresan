@@ -11,6 +11,7 @@ dotenv.config({ path: path.join(serverDir, '.env'), override: true })
 export const dbPath = path.join(dataDir, 'songbird.db')
 export const uploadsDir = path.join(dataDir, 'uploads', 'messages')
 export const avatarUploadsDir = path.join(dataDir, 'uploads', 'avatars')
+const backupDir = path.join(dataDir, 'backups')
 
 let sqlSingleton = null
 const USER_COLORS = [
@@ -89,6 +90,19 @@ export async function openDatabase() {
     return USER_COLORS[index]
   }
 
+  const createPreMigrationBackup = (fromVersion, toVersion) => {
+    if (!fileExists || !fs.existsSync(dbPath)) return
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true })
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const backupPath = path.join(
+      backupDir,
+      `songbird-pre-migration-v${fromVersion}-to-v${toVersion}-${stamp}.db`,
+    )
+    fs.copyFileSync(dbPath, backupPath)
+  }
+
   const schemaVersionBeforeMigrations = getSchemaVersion()
   const migrationContext = {
     db,
@@ -96,8 +110,15 @@ export async function openDatabase() {
     tableExists,
     hasColumn,
     getRandomUserColor,
+    setUserColor: getRandomUserColor,
   }
   const orderedMigrations = [...migrations].sort((a, b) => a.version - b.version)
+  const latestVersion = orderedMigrations.length
+    ? Math.max(...orderedMigrations.map((migration) => Number(migration.version) || 0))
+    : 0
+  if (schemaVersionBeforeMigrations < latestVersion) {
+    createPreMigrationBackup(schemaVersionBeforeMigrations, latestVersion)
+  }
   orderedMigrations.forEach((migration) => {
     if (getSchemaVersion() >= migration.version) return
     migration.up(migrationContext)
@@ -106,9 +127,6 @@ export async function openDatabase() {
   orderedMigrations.forEach((migration) => {
     migration.up(migrationContext)
   })
-  const latestVersion = orderedMigrations.length
-    ? Math.max(...orderedMigrations.map((migration) => Number(migration.version) || 0))
-    : 0
   if (getSchemaVersion() < latestVersion) {
     setSchemaVersion(latestVersion)
   }

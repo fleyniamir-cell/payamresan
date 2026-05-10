@@ -18,6 +18,7 @@ dotenv.config({ path: path.join(serverDir, ".env"), override: true });
 ensureStorageEncryptionKey({ projectRootDir, fsImpl: fs, pathImpl: path, cryptoImpl: crypto });
 const dataDir = path.resolve(serverDir, "..", "data");
 const dbPath = path.join(dataDir, "songbird.db");
+const backupDir = path.join(dataDir, "backups");
 const REMOTE_MESSAGE_CLIENT_REQUEST_SQL =
   "LOWER(COALESCE(client_request_id, '')) LIKE 'remote:%'";
 
@@ -50,6 +51,30 @@ function writeDatabaseToDisk() {
   const data = db.export();
   fs.writeFileSync(dbPath, Buffer.from(data));
   databaseDirty = false;
+}
+
+function createPreMigrationBackup(fromVersion, toVersion) {
+  if (!fileExists || !fs.existsSync(dbPath)) return null;
+
+  try {
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = path.join(
+      backupDir,
+      `songbird-pre-migration-v${fromVersion}-to-v${toVersion}-${stamp}.db`,
+    );
+    fs.copyFileSync(dbPath, backupPath);
+    return backupPath;
+  } catch (error) {
+    throw new Error(
+      `Unable to create pre-migration database backup: ${
+        error?.message || error
+      }`,
+    );
+  }
 }
 
 function saveDatabase() {
@@ -201,6 +226,16 @@ function runDatabaseMigrations() {
   const orderedMigrations = [...migrations].sort(
     (a, b) => a.version - b.version,
   );
+  const latestVersion = orderedMigrations.length
+    ? Math.max(
+        ...orderedMigrations.map((migration) => Number(migration.version) || 0),
+      )
+    : 0;
+  const startingVersion = getSchemaVersion();
+
+  if (startingVersion < latestVersion) {
+    createPreMigrationBackup(startingVersion, latestVersion);
+  }
 
   let appliedMigration = false;
 
@@ -218,12 +253,6 @@ function runDatabaseMigrations() {
   orderedMigrations.forEach((migration) => {
     migration.up(migrationContext);
   });
-
-  const latestVersion = orderedMigrations.length
-    ? Math.max(
-        ...orderedMigrations.map((migration) => Number(migration.version) || 0),
-      )
-    : 0;
 
   if (getSchemaVersion() < latestVersion) {
     setSchemaVersion(latestVersion);

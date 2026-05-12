@@ -9,6 +9,7 @@ import {
 } from "../lib/dbToolHelpers.js";
 import { createInviteToken } from "../lib/inviteTokens.js";
 import { storageEncryption } from "../lib/storageEncryption.js";
+import crypto from "crypto";
 
 function registerAdminRoutes(app, deps) {
   const {
@@ -984,11 +985,13 @@ function registerAdminRoutes(app, deps) {
         });
         const passwordHash = bcrypt.hashSync(password, 10);
 
+        // Use cryptographically secure random token generation
         const randomToken = (length = 6) => {
           const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+          const randomBytes = crypto.randomBytes(length);
           let output = "";
           for (let i = 0; i < length; i += 1) {
-            output += chars[Math.floor(Math.random() * chars.length)];
+            output += chars[randomBytes[i] % chars.length];
           }
           return output;
         };
@@ -1089,6 +1092,8 @@ function registerAdminRoutes(app, deps) {
         const maxMessageChars = Math.max(1, Number(MESSAGE_MAX_CHARS || 4000));
         const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
         const buildTimestampSchedule = (totalCount, days) => {
+          // Clamp days to prevent resource exhaustion
+          const safeDays = Math.max(1, Math.min(365, days));
           const now = new Date();
           const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
           const nowSecondsOfDay =
@@ -1098,15 +1103,15 @@ function registerAdminRoutes(app, deps) {
             today.getMonth(),
             today.getDate(),
           );
-          startDay.setDate(startDay.getDate() - (days - 1));
+          startDay.setDate(startDay.getDate() - (safeDays - 1));
 
-          const perDay = new Array(days).fill(0);
+          const perDay = new Array(safeDays).fill(0);
           for (let i = 0; i < totalCount; i += 1) {
-            perDay[i % days] += 1;
+            perDay[i % safeDays] += 1;
           }
 
           const stamps = [];
-          for (let dayIndex = 0; dayIndex < days; dayIndex += 1) {
+          for (let dayIndex = 0; dayIndex < safeDays; dayIndex += 1) {
             const messagesInDay = perDay[dayIndex];
             if (!messagesInDay) continue;
             const dayStart = new Date(startDay);

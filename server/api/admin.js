@@ -1135,6 +1135,10 @@ function registerAdminRoutes(app, deps) {
           for (let dayIndex = 0; dayIndex < safeDays; dayIndex += 1) {
             const messagesInDay = perDay[dayIndex];
             if (!messagesInDay) continue;
+            
+            // Limit messages per day to prevent resource exhaustion
+            const safeMessagesInDay = Math.min(1000, messagesInDay);
+            
             const dayStart = new Date(startDay);
             dayStart.setDate(startDay.getDate() + dayIndex);
             const isToday =
@@ -1145,7 +1149,7 @@ function registerAdminRoutes(app, deps) {
               ? Math.max(0, Math.min(86399, nowSecondsOfDay))
               : 86399;
             const seconds = [];
-            for (let i = 0; i < messagesInDay; i += 1) {
+            for (let i = 0; i < safeMessagesInDay; i += 1) {
               const secondOfDay = Math.floor(Math.random() * (maxSecondOfDay + 1));
               seconds.push(secondOfDay);
             }

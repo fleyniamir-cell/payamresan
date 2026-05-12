@@ -985,13 +985,32 @@ function registerAdminRoutes(app, deps) {
         });
         const passwordHash = bcrypt.hashSync(password, 10);
 
-        // Use cryptographically secure random token generation
+        // Use cryptographically secure random token generation without bias
         const randomToken = (length = 6) => {
           const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-          const randomBytes = crypto.randomBytes(length);
+          const charsLength = chars.length;
           let output = "";
+          
+          // Use rejection sampling to avoid modulo bias
+          const maxValid = 256 - (256 % charsLength);
+          const randomBytes = crypto.randomBytes(length * 2); // Get extra bytes for rejection sampling
+          
+          let byteIndex = 0;
           for (let i = 0; i < length; i += 1) {
-            output += chars[randomBytes[i] % chars.length];
+            let randomByte = randomBytes[byteIndex++];
+            
+            // Rejection sampling: reject values that would cause bias
+            while (randomByte >= maxValid) {
+              if (byteIndex >= randomBytes.length) {
+                // Need more random bytes
+                const moreBytes = crypto.randomBytes(length);
+                randomBytes.set(moreBytes, 0);
+                byteIndex = 0;
+              }
+              randomByte = randomBytes[byteIndex++];
+            }
+            
+            output += chars[randomByte % charsLength];
           }
           return output;
         };
@@ -1092,8 +1111,10 @@ function registerAdminRoutes(app, deps) {
         const maxMessageChars = Math.max(1, Number(MESSAGE_MAX_CHARS || 4000));
         const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
         const buildTimestampSchedule = (totalCount, days) => {
-          // Clamp days to prevent resource exhaustion
+          // Clamp both parameters to prevent resource exhaustion
           const safeDays = Math.max(1, Math.min(365, days));
+          const safeCount = Math.max(0, Math.min(10000, totalCount));
+          
           const now = new Date();
           const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
           const nowSecondsOfDay =
@@ -1106,7 +1127,7 @@ function registerAdminRoutes(app, deps) {
           startDay.setDate(startDay.getDate() - (safeDays - 1));
 
           const perDay = new Array(safeDays).fill(0);
-          for (let i = 0; i < totalCount; i += 1) {
+          for (let i = 0; i < safeCount; i += 1) {
             perDay[i % safeDays] += 1;
           }
 

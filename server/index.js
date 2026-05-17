@@ -107,7 +107,11 @@ import {
   markRemoteChannelQueueItemSkipped,
   releaseStaleRemoteChannelQueueItems,
   setRemoteChannelProviderState,
+  skipAllRemoteChannelQueueItems,
+  skipCurrentRemoteChannelQueueItem,
+  getCurrentRemoteChannelQueueItemId,
   updateRemoteChannelSourceError,
+  updateRemoteChannelSourcePaused,
   updateRemoteChannelSourceSeen,
   upsertRemoteChannelSource,
 } from "./db.js";
@@ -273,6 +277,14 @@ const TRANSCODE_VIDEOS_TO_H264 = readEnvBool(
 
 const FILE_UPLOAD = readEnvBool("FILE_UPLOAD", true);
 const REMOTE_CHANNEL = readEnvBool("REMOTE_CHANNEL", false);
+const REMOTE_CHANNEL_UI = readEnvBool(
+  "REMOTE_CHANNEL_UI",
+  true,
+);
+const REMOTE_CHANNEL_MEDIA_STREAM = readEnvBool(
+  "REMOTE_CHANNEL_MEDIA_STREAM",
+  true,
+);
 const REMOTE_CHANNEL_TELEGRAM_API_ID = readEnvInt(
   "REMOTE_CHANNEL_TELEGRAM_API_ID",
   0,
@@ -294,6 +306,8 @@ const REMOTE_CHANNEL_TELEGRAM_CONFIGURED = Boolean(
 );
 const REMOTE_CHANNEL_CONFIG = {
   enabled: REMOTE_CHANNEL,
+  uiEnabled: REMOTE_CHANNEL_UI,
+  mediaStreamEnabled: REMOTE_CHANNEL_MEDIA_STREAM,
   telegramConfigured: REMOTE_CHANNEL_TELEGRAM_CONFIGURED,
   proxyConfigured: Boolean(REMOTE_CHANNEL_PROXY_URL),
   telegramApiId: REMOTE_CHANNEL_TELEGRAM_API_ID,
@@ -315,6 +329,10 @@ const REMOTE_CHANNEL_CONFIG = {
     max: 100,
   }),
   queueBatchSize: readEnvInt("REMOTE_CHANNEL_QUEUE_BATCH_SIZE", 10, {
+    min: 1,
+    max: 50,
+  }),
+  queueConcurrency: readEnvInt("REMOTE_CHANNEL_QUEUE_CONCURRENCY", 3, {
     min: 1,
     max: 50,
   }),
@@ -373,7 +391,7 @@ const {
   registerUploadRoutes,
 } = uploadTools;
 
-const { addSseClient, removeSseClient, emitSseEvent, emitChatEvent } = createSseHub({
+const { addSseClient, removeSseClient, emitSseEvent, emitChatEvent, getCachedMembers } = createSseHub({
   listChatMembers,
 });
 
@@ -383,6 +401,7 @@ const pushService = createPushService({
   deletePushSubscription,
   getTotalUnreadCount,
   vapid,
+  proxyUrl: process.env.PUSH_PROXY_URL || "",
 });
 const { PUSH_ENABLED, VAPID_PUBLIC_KEY, sendPushNotificationToUsers } = pushService;
 
@@ -534,6 +553,8 @@ const apiDeps = {
   ACCOUNT_CREATION,
   REMOTE_CHANNELS: {
     enabled: REMOTE_CHANNEL_CONFIG.enabled,
+    uiEnabled: REMOTE_CHANNEL_CONFIG.uiEnabled,
+    mediaStreamEnabled: REMOTE_CHANNEL_CONFIG.mediaStreamEnabled,
     telegramConfigured: REMOTE_CHANNEL_CONFIG.telegramConfigured,
     proxyConfigured: REMOTE_CHANNEL_CONFIG.proxyConfigured,
   },
@@ -585,6 +606,7 @@ const apiDeps = {
   findUserById,
   findUserByUsername,
   fs,
+  getCachedMembers,
   getMessageReadCounts,
   getMessageAuthors,
   getMessageReadByUser,
@@ -629,6 +651,9 @@ const apiDeps = {
   parseUploadFileMetadata,
   path,
   projectRootDir,
+  skipAllRemoteChannelQueueItems,
+  skipCurrentRemoteChannelQueueItem,
+  updateRemoteChannelSourcePaused,
   probeVideoMetadata,
   regenerateGroupInviteToken,
   removeAllMessageUploads,
@@ -698,6 +723,9 @@ const remoteChannelManager = createRemoteChannelManager({
   markRemoteChannelQueueItemDone,
   markRemoteChannelQueueItemRetry,
   markRemoteChannelQueueItemSkipped,
+  skipAllRemoteChannelQueueItems,
+  skipCurrentRemoteChannelQueueItem,
+  getCurrentRemoteChannelQueueItemId,
   path,
   probeVideoMetadata,
   sanitizeDurationSeconds,
@@ -745,7 +773,7 @@ if (isProduction) {
     }),
   );
 
-  app.get("*", (req, res) => {
+  app.get("*path", (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.sendFile(path.join(clientDist, "index.html"));
   });

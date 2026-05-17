@@ -52,8 +52,11 @@ export default function NewGroupModal({
   onRegenerateInvite,
   showRemoteChannelSettings = false,
   remoteChannelAvailable = true,
+  remoteChannelMediaStreamAllowed = false,
   entityLabel = "Group",
   onDeleteChat,
+  chatId: _chatId = null,
+  username: _username = "",
 }) {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [remoteSourceMenuOpen, setRemoteSourceMenuOpen] = useState(false);
@@ -141,7 +144,9 @@ export default function NewGroupModal({
     groupForm.remoteChannelSyncMetadata,
   );
   const remoteChannelStreamMedia =
-    fileUploadEnabled && Boolean(groupForm.remoteChannelStreamMedia);
+    fileUploadEnabled &&
+    remoteChannelMediaStreamAllowed &&
+    Boolean(groupForm.remoteChannelStreamMedia);
   const privateChatEnabled = groupForm.visibility === "private";
   const memberInvitesLocked = !privateChatEnabled;
   const memberInvitesEnabled =
@@ -425,22 +430,25 @@ export default function NewGroupModal({
 
             {showRemoteChannelSettings ? (
               <div className="rounded-2xl border border-emerald-200 p-3 dark:border-emerald-500/30">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Connection
-                </p>
-                <div className="mt-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    Connection
+                  </p>
                   {groupForm.remoteChannelLoading ? (
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <LoaderCircle size={14} className="animate-spin text-emerald-500" />
                       Loading...
-                    </p>
-                  ) : remoteLastError ? (
-                    <p className="mt-1 break-words text-xs text-rose-600 dark:text-rose-200">
-                      {remoteLastError}
-                    </p>
+                    </span>
                   ) : null}
                 </div>
-                <div className="mt-3">
-                  <button
+                {!groupForm.remoteChannelLoading && remoteLastError ? (
+                  <p className="mt-2 break-words text-xs text-rose-600 dark:text-rose-200">
+                    {remoteLastError}
+                  </p>
+                ) : null}
+                {!groupForm.remoteChannelLoading ? (
+                  <div className="mt-3">
+                    <button
                     type="button"
                     role="switch"
                     aria-checked={effectiveRemoteChannelEnabled}
@@ -474,6 +482,7 @@ export default function NewGroupModal({
                     </span>
                   </button>
                 </div>
+                ) : null}
                 {effectiveRemoteChannelEnabled ? (
                   <div className="mt-3 space-y-3">
                     <div className="relative">
@@ -581,9 +590,9 @@ export default function NewGroupModal({
                       type="button"
                       role="switch"
                       aria-checked={remoteChannelStreamMedia}
-                      disabled={!fileUploadEnabled}
+                      disabled={!fileUploadEnabled || !remoteChannelMediaStreamAllowed}
                       onClick={() => {
-                        if (!fileUploadEnabled) return;
+                        if (!fileUploadEnabled || !remoteChannelMediaStreamAllowed) return;
                         setGroupForm((prev) => ({
                           ...prev,
                           remoteChannelStreamMedia:
@@ -591,7 +600,7 @@ export default function NewGroupModal({
                         }));
                       }}
                       className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
-                        fileUploadEnabled
+                        fileUploadEnabled && remoteChannelMediaStreamAllowed
                           ? "border-emerald-200/70 bg-white/90 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 hover:shadow-[0_0_18px_rgba(16,185,129,0.18)] dark:border-emerald-500/30 dark:bg-slate-900/50 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
                           : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-500"
                       }`}

@@ -464,6 +464,8 @@ nano .env
 | `MESSAGE_TEXT_RETENTION` | `عدد` | `0` | حذف خودکار پیام‌های فقط متنی بعد از N روز. (`0` یعنی غیرفعال) |
 | `MESSAGE_MAX_CHARS` | `عدد` | `4000` | حداکثر طول پیام. |
 | `REMOTE_CHANNEL` | `بولی` | `false` | فعال‌کردن worker سمت سرور و تنظیمات owner کانال برای Remote Channel. |
+| `REMOTE_CHANNEL_UI` | `بولی` | `true` | اجازه فعال‌سازی Remote Channel در رابط کاربری برای مالکان کانال. وقتی `false` باشد، دکمه Remote Channel برای همه کانال‌ها غیرفعال و قفل می‌شود و کانال‌هایی که قبلا آن را فعال کرده‌اند به‌صورت خودکار در رابط کاربری غیرفعال می‌شوند. |
+| `REMOTE_CHANNEL_MEDIA_STREAM` | `بولی` | `true` | اجازه فعال‌سازی گزینه "Stream Media Files" در رابط کاربری برای مالکان کانال. وقتی `false` باشد، این گزینه برای همه کانال‌ها غیرفعال و قفل می‌شود. |
 | `REMOTE_CHANNEL_TELEGRAM_API_ID` | `عدد` | `0` | API ID تلگرام. |
 | `REMOTE_CHANNEL_TELEGRAM_API_HASH` | `رشته` | `""` | API hash تلگرام. |
 | `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` | `رشته` | `""` | مقدار Telegram StringSession. مثل رمز عبور از آن محافظت کنید. |
@@ -473,6 +475,7 @@ nano .env
 | `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `عدد` | `1000` | فاصله زمانی پردازش صف پست‌های تلگرام. (میلی‌ثانیه) |
 | `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `عدد` | `10` | حداکثر تلاش دوباره قبل از اینکه یک پست remote ناموفق علامت بخورد. |
 | `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `عدد` | `10` | حداکثر تعداد پست remote که در هر اجرای worker پردازش می‌شود. (`1` تا `50`) |
+| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `عدد` | `3` | تعداد آیتم‌هایی که به‌صورت همزمان در هر اجرای worker پردازش می‌شوند. همچنین تعداد sourceهای تلگرام که به‌صورت موازی poll می‌شوند را کنترل می‌کند. |
 | `REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS` | `عدد` | `300000` | زمانی که بعد از آن lock در حال پردازش قدیمی محسوب می‌شود و دوباره قابل تلاش است. (میلی‌ثانیه) |
 | `CHAT_PENDING_TEXT_TIMEOUT` | `عدد` | `300000` | مدت‌زمانی که بعد از آن پیام متنی pending ناموفق علامت می‌خورد. (میلی‌ثانیه) |
 | `CHAT_PENDING_FILE_TIMEOUT` | `عدد` | `1200000` | مدت‌زمان timeout برای آپلود فایل یا پیام فایل pending. (میلی‌ثانیه) |
@@ -495,6 +498,7 @@ nano .env
 | `VAPID_PUBLIC_KEY` | `رشته` | خودکار تولید می‌شود | کلید عمومی Web Push. |
 | `VAPID_PRIVATE_KEY` | `رشته` | خودکار تولید می‌شود | کلید خصوصی Web Push. |
 | `VAPID_SUBJECT` | `رشته` | خودکار تولید می‌شود | اطلاعات تماس VAPID (ایمیل یا URL) برای سرویس‌های push. |
+| `PUSH_PROXY_URL` | `رشته` | `""` | آدرس پروکسی برای ارسال push notification. زمانی استفاده کنید که سرور شما نمی‌تواند مستقیما به endpointهای سرویس push دسترسی داشته باشد. |
 
 > [!NOTE]
 > **Push notification به HTTPS نیاز دارد**، به جز `localhost` در حالت توسعه. در iOS هم نیاز به PWA نصب‌شده دارید. (`iOS 16.4+`)
@@ -585,6 +589,49 @@ session ساخته‌شده را خصوصی نگه دارید. این session ب
 - **Stream Media Files** وقتی `FILE_UPLOAD=true` باشد mediaهای Telegram را داخل آپلودهای Songbird ذخیره می‌کند. این گزینه از محدودیت حجم/تعداد آپلود، retention فایل، رمزنگاری در حالت ذخیره و تنظیمات transcoding ویدیو پیروی می‌کند. پست‌های آینه‌شده فقط متنی از `MESSAGE_TEXT_RETENTION` پیروی می‌کنند.
 - پست‌هایی که متن یا caption ندارند فقط وقتی آینه می‌شوند که stream media فعال باشد و حداقل یک فایل media پشتیبانی‌شده قابل ذخیره باشد.
 
+## تنظیم پروکسی برای Push Notification
+
+اگر سرور شما به دلیل محدودیت‌های فایروال یا سیاست‌های شبکه نمی‌تواند به endpointهای سرویس push (Google FCM، Mozilla Push Service، Apple Push) دسترسی داشته باشد، می‌توانید یک پروکسی تنظیم کنید:
+
+### 1. پروکسی را در `.env` تنظیم کنید:
+```bash
+PUSH_PROXY_URL="http://your-proxy-server:3128"
+```
+
+### 2. سرویس را ری‌استارت کنید:
+```bash
+sudo systemctl restart songbird
+```
+
+### 3. در لاگ‌ها بررسی کنید:**
+```bash
+journalctl -u songbird -f | grep push
+# باید این پیام را ببینید: [push] Using proxy: http://your-proxy-server:3128
+```
+
+**فرمت‌های آدرس پروکسی:**
+- HTTP: `http://proxy.example.com:3128`
+- با احراز هویت: `http://username:password@proxy.example.com:8080`
+- SOCKS5: `socks5://proxy.example.com:1080`
+
+**endpointهای مورد نیاز** (پروکسی باید به این آدرس‌ها از طریق HTTPS/443 دسترسی داشته باشد):
+- `fcm.googleapis.com` (Chrome/Edge)
+- `*.push.services.mozilla.com` (Firefox)
+- `web.push.apple.com` (Safari)
+- `*.notify.windows.com` (Edge)
+
+**عیب‌یابی خطاهای ارسال push:**
+
+اگر در لاگ‌ها خطاهایی مثل `[push] delivery failed ... status=0 ... AggregateError` می‌بینید، این نشان‌دهنده مشکلات اتصال شبکه به سرویس‌های push است. دلایل رایج:
+- فایروال مسدود کردن اتصالات خروجی HTTPS
+- خطای DNS resolution
+- محدودیت‌های شبکه که نیاز به استفاده از پروکسی دارند
+
+تست اتصال پروکسی:
+```bash
+curl -x http://your-proxy:3128 https://fcm.googleapis.com
+```
+
 ## به‌روزرسانی نسخه نصب‌شده
 
 > [!WARNING]
@@ -641,8 +688,11 @@ sudo systemctl reload nginx
 - ریست دیتابیس: `npm run db:reset`
 - حذف دیتابیس: `npm run db:delete`
 - ساخت گروه یا کانال: `npm run db:chat:create`
+- ساخت کانال با ریموت کانال: `npm run db:chat:create -- --type channel --name "My Channel" --owner alice --username my_channel --remote-channel <telegram-source> [--sync-metadata] [--stream-media]`
 - اضافه کردن کاربر به گروه یا کانال: `npm run db:chat:add`
 - ویرایش گروه یا کانال یا انتقال مالکیت: `npm run db:chat:edit`
+- ویرایش پیکربندی ریموت کانال: `npm run db:chat:edit -- <channel> --remote-channel <telegram-source> [--sync-metadata | --no-sync-metadata] [--stream-media | --no-stream-media]`
+- مدیریت صف ریموت کانال: `npm run db:chat:edit -- <channel> [--enable-remote | --disable-remote | --pause-queue | --resume-queue | --skip-queue | --skip-all-queue]`
 - حذف چت‌ها: `npm run db:chat:delete`
 - حذف فایل‌ها: `npm run db:file:delete` (برای حذف همه نیاز به `--all` دارد)
 - ویرایش کاربر: `npm run db:user:edit`
@@ -721,6 +771,11 @@ npm run db:chat:create -- --type channel --name "Announcements" --owner songbird
 
 ```bash
 cd server
+
+# ساخت کانال با ریموت کانال
+npm run db:chat:create -- --type channel --name "My Channel" --owner alice --username my_channel --remote-channel @telegram_source --sync-metadata --stream-media
+
+# اضافه کردن کاربر به چت
 npm run db:chat:add -- core.team songbird.sage2 songbird.sage3
 
 # می‌توانید از id چت هم استفاده کنید:
@@ -735,6 +790,19 @@ npm run db:chat:edit -- core.team --name "Core Team HQ" --visibility public --co
 
 # می‌توانید از id چت هم استفاده کنید:
 npm run db:chat:edit -- 1 --owner songbird.sage2
+
+# به‌روزرسانی پیکربندی ریموت کانال:
+npm run db:chat:edit -- my_channel --remote-channel @new_telegram_source
+npm run db:chat:edit -- my_channel --sync-metadata
+npm run db:chat:edit -- my_channel --no-stream-media
+
+# مدیریت ریموت کانال:
+npm run db:chat:edit -- my_channel --enable-remote
+npm run db:chat:edit -- my_channel --disable-remote
+npm run db:chat:edit -- my_channel --pause-queue
+npm run db:chat:edit -- my_channel --resume-queue
+npm run db:chat:edit -- my_channel --skip-queue
+npm run db:chat:edit -- my_channel --skip-all-queue
 ```
 
 ویرایش کاربر:

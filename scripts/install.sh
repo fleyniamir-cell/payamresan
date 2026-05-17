@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# songbird-deploy-version: 0.10.0
+# songbird-deploy-version: 0.10.1
 
 set -uo pipefail
 
@@ -1778,6 +1778,8 @@ MESSAGE_FILE_RETENTION=${RETENTION_DAYS}
 MESSAGE_TEXT_RETENTION=${TEXT_RETENTION_DAYS}
 MESSAGE_MAX_CHARS=4000
 REMOTE_CHANNEL=false
+REMOTE_CHANNEL_UI=true
+REMOTE_CHANNEL_MEDIA_STREAM=true
 REMOTE_CHANNEL_TELEGRAM_API_ID=0
 REMOTE_CHANNEL_TELEGRAM_API_HASH=""
 REMOTE_CHANNEL_TELEGRAM_SESSION_STRING=""
@@ -1787,6 +1789,7 @@ REMOTE_CHANNEL_TELEGRAM_POLL_LIMIT=50
 REMOTE_CHANNEL_QUEUE_INTERVAL_MS=1000
 REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS=10
 REMOTE_CHANNEL_QUEUE_BATCH_SIZE=10
+REMOTE_CHANNEL_QUEUE_CONCURRENCY=3
 REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS=300000
 CHAT_PENDING_TEXT_TIMEOUT=300000
 CHAT_PENDING_FILE_TIMEOUT=1200000
@@ -1809,6 +1812,7 @@ STORAGE_ENCRYPTION_KEY=${existing_storage_encryption_key}
 VAPID_PUBLIC_KEY=${existing_public_key}
 VAPID_PRIVATE_KEY=${existing_private_key}
 VAPID_SUBJECT=${existing_subject}
+PUSH_PROXY_URL=""
 EOF" || return 1
   if [[ -n "$CERTBOT_EMAIL" ]]; then
     replace_env_value "$env_file" "VAPID_SUBJECT" "mailto:${CERTBOT_EMAIL}" || return 1
@@ -2779,13 +2783,17 @@ ensure_songbird_stopped_for_update() {
   log "Checking whether Songbird is running before update..."
 
   if songbird_service_is_running; then
-    warn "Songbird service is running. Stop it before updating so database migrations cannot race the running server."
-    press_enter_to_continue
-    return 1
+    log "Songbird service is running. Stopping it before update..."
+    if ! run_as_root systemctl stop songbird.service; then
+      warn "Failed to stop Songbird service. Stop it manually before updating."
+      press_enter_to_continue
+      return 1
+    fi
+    log "Songbird service stopped."
   fi
 
   if songbird_healthcheck_responds "$port"; then
-    warn "Songbird is running on port ${port}. Stop it before updating so database migrations cannot race the running server."
+    warn "Songbird is still running on port ${port}. Stop it before updating."
     press_enter_to_continue
     return 1
   fi
@@ -3087,6 +3095,82 @@ remove_songbird() {
     fi
   fi
 
+  press_enter_to_continue
+}
+
+configure_push_proxy() {
+  local env_file="$INSTALL_DIR/.env"
+  if [[ ! -f "$env_file" ]]; then
+    warn ".env file not found. Install Songbird first."
+    press_enter_to_continue
+    return 1
+  fi
+
+  clear
+  show_banner
+  printf "\n"
+  printf "Configure Push Notification Proxy\n"
+  printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+  
+  local current_proxy=""
+  current_proxy="$(get_existing_env_value "PUSH_PROXY_URL" "")"
+  
+  if [[ -n "$current_proxy" ]]; then
+    printf "Current proxy: %s\n\n" "$current_proxy"
+  else
+    printf "No proxy currently configured.\n\n"
+  fi
+  
+  printf "Use a proxy when your server cannot directly reach push service endpoints:\n"
+  printf "  • fcm.googleapis.com (Chrome/Edge)\n"
+  printf "  • *.push.services.mozilla.com (Firefox)\n"
+  printf "  • web.push.apple.com (Safari)\n\n"
+  
+  printf "Proxy URL formats:\n"
+  printf "  • HTTP: http://proxy.example.com:3128\n"
+  printf "  • With auth: http://user:pass@proxy.example.com:8080\n"
+  printf "  • SOCKS5: socks5://proxy.example.com:1080\n\n"
+  
+  local proxy_url=""
+  prompt_read "Enter proxy URL (leave blank to disable proxy): " proxy_url
+  proxy_url="${proxy_url#"${proxy_url%%[![:space:]]*}"}"
+  proxy_url="${proxy_url%"${proxy_url##*[![:space:]]}"}"
+  
+  if [[ -z "$proxy_url" ]]; then
+    log "Clearing proxy configuration..."
+    replace_env_value "$env_file" "PUSH_PROXY_URL" ""
+  else
+    # Test proxy connectivity if curl is available
+    if have_cmd curl; then
+      printf "\nTesting proxy connectivity...\n"
+      if curl -x "$proxy_url" -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://fcm.googleapis.com 2>/dev/null | grep -q "200\|301\|302"; then
+        printf "✓ Proxy is reachable!\n"
+      else
+        warn "Could not verify proxy connectivity. Proceeding anyway..."
+      fi
+    fi
+    
+    log "Setting proxy to: $proxy_url"
+    replace_env_value "$env_file" "PUSH_PROXY_URL" "$proxy_url"
+  fi
+  
+  log "Installing dependencies..."
+  if ! run_in_install_dir "cd server && npm install"; then
+    warn "Failed to install dependencies."
+    press_enter_to_continue
+    return 1
+  fi
+  
+  log "Restarting Songbird service..."
+  if ! run_logged_quiet run_as_root systemctl restart songbird; then
+    warn "Failed to restart service."
+    press_enter_to_continue
+    return 1
+  fi
+  
+  printf "\n"
+  log "Proxy configuration applied successfully!"
+  
   press_enter_to_continue
 }
 
@@ -3514,13 +3598,17 @@ User and chat management:
         Passes: -y selector
   14    Create group/channel
         Prompts: type, name, username, visibility, owner, optional members
-        Passes: --type --name --owner --username --visibility --users
+        For channels: optional remote channel configuration (Telegram source, sync metadata, stream media)
+        Passes: --type --name --owner --username --visibility --users [--remote-channel --sync-metadata --stream-media]
   15    Add members to chat
         Prompts: chat selector, all-users yes/no, or user selectors
         Passes: chat selector plus --all or user selectors
   16    Edit chat
         Prompts: chat selector and optional profile/settings fields
+        For channels with remote channel: menu with 9 actions (update source, toggle settings, enable/disable, pause/resume queue, skip queue items)
         Passes: selector plus any changed --name/--username/--visibility/--color/--owner/invite flag
+        Or: --remote-channel --sync-metadata/--no-sync-metadata --stream-media/--no-stream-media
+        Or: --enable-remote/--disable-remote --pause-queue/--resume-queue --skip-queue/--skip-all-queue
 
 Remote channel configuration:
   17    Configure Remote Channel
@@ -3752,6 +3840,10 @@ db_chat_create() {
   local visibility=""
   local owner=""
   local members=""
+  local configure_remote="no"
+  local remote_source=""
+  local sync_metadata="no"
+  local stream_media="no"
 
   prompt_read "Type (group/channel, default: group): " type
   type="${type#"${type%%[![:space:]]*}"}"
@@ -3767,13 +3859,39 @@ db_chat_create() {
   owner="$(prompt_non_empty "Owner username or id")"
   prompt_read "Add members (comma separated usernames/ids, optional): " members
 
-  run_db_command npm --prefix server run db:chat:create -- \
-    --type "$type" \
-    --name "$name" \
-    --owner "$owner" \
-    --username "$username" \
-    --visibility "$visibility" \
+  local args=(
+    --type "$type"
+    --name "$name"
+    --owner "$owner"
+    --username "$username"
+    --visibility "$visibility"
     --users "$members"
+  )
+
+  # Only offer remote channel configuration for channels
+  if [[ "${type,,}" == "channel" ]]; then
+    configure_remote="$(prompt_yes_no "Configure remote channel for this channel?" "no")"
+    
+    if [[ "$configure_remote" == "yes" ]]; then
+      local remote_enabled="$(get_existing_env_value "REMOTE_CHANNEL" "false")"
+      remote_enabled="${remote_enabled,,}"
+      if [[ "$remote_enabled" != "true" ]]; then
+        warn "Remote channel feature is disabled. Configure it first."
+        press_enter_to_continue
+        return 1
+      fi
+      
+      remote_source="$(prompt_non_empty "Telegram source (username, t.me link, or chat ID)")"
+      sync_metadata="$(prompt_yes_no "Sync metadata (name/avatar) from Telegram?" "yes")"
+      stream_media="$(prompt_yes_no "Stream media files from Telegram?" "yes")"
+      
+      args+=(--remote-channel "$remote_source")
+      [[ "$sync_metadata" == "yes" ]] && args+=(--sync-metadata)
+      [[ "$stream_media" == "yes" ]] && args+=(--stream-media)
+    fi
+  fi
+
+  run_db_command npm --prefix server run db:chat:create -- "${args[@]}"
   press_enter_to_continue
 }
 
@@ -3812,9 +3930,93 @@ db_chat_edit() {
   local owner=""
   local invites=""
   local effective_visibility=""
+  local configure_remote="no"
+  local remote_action=""
+  local remote_source=""
+  local sync_metadata=""
+  local stream_media=""
   local args=()
 
   chat="$(prompt_non_empty "Chat id or username")"
+  
+  configure_remote="$(prompt_yes_no "Update remote channel configuration?" "no")"
+  
+  if [[ "$configure_remote" == "yes" ]]; then
+    local remote_enabled="$(get_existing_env_value "REMOTE_CHANNEL" "false")"
+    remote_enabled="${remote_enabled,,}"
+    if [[ "$remote_enabled" != "true" ]]; then
+      warn "Remote channel feature is disabled. Configure it first."
+      press_enter_to_continue
+      return 1
+    fi
+    
+    args+=("$chat")
+    
+    printf "\n Remote channel Actions:\n"
+    printf "  1. Update Telegram source\n"
+    printf "  2. Toggle sync metadata\n"
+    printf "  3. Toggle stream media\n"
+    printf "  4. Enable remote channel\n"
+    printf "  5. Disable remote channel\n"
+    printf "  6. Pause queue\n"
+    printf "  7. Resume queue\n"
+    printf "  8. Skip current queue item\n"
+    printf "  9. Skip all queue items\n"
+    printf "\n"
+    
+    prompt_read "Select action (1-9, or leave blank to cancel): " remote_action
+    
+    case "$remote_action" in
+      1)
+        remote_source="$(prompt_non_empty "New Telegram source (username, t.me link, or chat ID)")"
+        args+=(--remote-channel "$remote_source")
+        ;;
+      2)
+        prompt_read "Sync metadata? (yes/no): " sync_metadata
+        if [[ "${sync_metadata,,}" == "yes" ]]; then
+          args+=(--sync-metadata)
+        elif [[ "${sync_metadata,,}" == "no" ]]; then
+          args+=(--no-sync-metadata)
+        fi
+        ;;
+      3)
+        prompt_read "Stream media? (yes/no): " stream_media
+        if [[ "${stream_media,,}" == "yes" ]]; then
+          args+=(--stream-media)
+        elif [[ "${stream_media,,}" == "no" ]]; then
+          args+=(--no-stream-media)
+        fi
+        ;;
+      4)
+        args+=(--enable-remote)
+        ;;
+      5)
+        args+=(--disable-remote)
+        ;;
+      6)
+        args+=(--pause-queue)
+        ;;
+      7)
+        args+=(--resume-queue)
+        ;;
+      8)
+        args+=(--skip-queue)
+        ;;
+      9)
+        args+=(--skip-all-queue)
+        ;;
+      *)
+        log "No action selected. Canceled."
+        press_enter_to_continue
+        return 0
+        ;;
+    esac
+    
+    run_db_command npm --prefix server run db:chat:edit -- "${args[@]}"
+    press_enter_to_continue
+    return 0
+  fi
+
   prompt_read "New chat name (optional): " name
   prompt_read "New chat username/handle (optional, without @): " username
   prompt_read "Visibility (public/private, optional): " visibility

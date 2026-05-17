@@ -505,8 +505,8 @@ export function getRemoteChannelSourceByChatId(chatId) {
   return getRow(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
             source_title, source_avatar_url, last_remote_message_id, enabled,
-            source_version, sync_metadata, stream_media, last_error, last_seen_at,
-            created_at, updated_at
+            paused, source_version, sync_metadata, stream_media, last_error,
+            last_seen_at, created_at, updated_at
      FROM remote_channel_sources
      WHERE chat_id = ? AND provider = 'telegram'`,
     [Number(chatId)],
@@ -517,8 +517,8 @@ export function getRemoteChannelSourceById(sourceId) {
   return getRow(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
             source_title, source_avatar_url, last_remote_message_id, enabled,
-            source_version, sync_metadata, stream_media, last_error, last_seen_at,
-            created_at, updated_at
+            paused, source_version, sync_metadata, stream_media, last_error,
+            last_seen_at, created_at, updated_at
      FROM remote_channel_sources
      WHERE id = ? AND provider = 'telegram'`,
     [Number(sourceId)],
@@ -629,10 +629,10 @@ export function listEnabledRemoteChannelSources(provider = "telegram") {
   return getAll(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
             source_title, source_avatar_url, last_remote_message_id, enabled,
-            source_version, sync_metadata, stream_media, last_error, last_seen_at,
-            created_at, updated_at
+            paused, source_version, sync_metadata, stream_media, last_error,
+            last_seen_at, created_at, updated_at
      FROM remote_channel_sources
-     WHERE provider = ? AND enabled = 1
+     WHERE provider = ? AND enabled = 1 AND paused = 0
      ORDER BY id ASC`,
     [String(provider || "telegram")],
   );
@@ -742,6 +742,72 @@ export function updateRemoteChannelSourceError(sourceId, error) {
      SET last_error = ?, updated_at = datetime('now')
      WHERE id = ?`,
     [nextError, id],
+  );
+}
+
+export function updateRemoteChannelSourcePaused(sourceId, paused) {
+  const id = Number(sourceId || 0);
+  if (!id) return 0;
+
+  return run(
+    `UPDATE remote_channel_sources
+     SET paused = ?, updated_at = datetime('now')
+     WHERE id = ?`,
+    [paused ? 1 : 0, id],
+  );
+}
+
+export function getCurrentRemoteChannelQueueItemId(sourceId) {
+  const id = Number(sourceId || 0);
+  if (!id) return null;
+
+  const row = getRow(
+    `SELECT id FROM remote_channel_queue
+     WHERE source_id = ?
+       AND status IN ('pending', 'retry', 'processing')
+     ORDER BY id ASC
+     LIMIT 1`,
+    [id],
+  );
+  return row ? Number(row.id) : null;
+}
+
+export function skipCurrentRemoteChannelQueueItem(sourceId) {
+  const id = Number(sourceId || 0);
+  if (!id) return 0;
+
+  return run(
+    `UPDATE remote_channel_queue
+     SET status = 'skipped',
+         locked_at = NULL,
+         lock_owner = NULL,
+         last_error = 'Manually skipped.',
+         processed_at = datetime('now')
+     WHERE id = (
+       SELECT id FROM remote_channel_queue
+       WHERE source_id = ?
+         AND status IN ('pending', 'retry', 'processing')
+       ORDER BY id ASC
+       LIMIT 1
+     )`,
+    [id],
+  );
+}
+
+export function skipAllRemoteChannelQueueItems(sourceId) {
+  const id = Number(sourceId || 0);
+  if (!id) return 0;
+
+  return run(
+    `UPDATE remote_channel_queue
+     SET status = 'skipped',
+         locked_at = NULL,
+         lock_owner = NULL,
+         last_error = 'Manually skipped.',
+         processed_at = datetime('now')
+     WHERE source_id = ?
+       AND status IN ('pending', 'retry', 'processing')`,
+    [id],
   );
 }
 
@@ -900,6 +966,7 @@ export function claimNextRemoteChannelQueueItem(lockOwner, nowIso) {
      WHERE q.provider = 'telegram'
        AND s.provider = 'telegram'
        AND s.enabled = 1
+       AND s.paused = 0
        AND q.source_version = s.source_version
        AND c.type = 'channel'
        AND q.status IN ('pending', 'retry')
@@ -2042,7 +2109,7 @@ export function getMessageAuthors(messageIds = []) {
   if (!normalized.length) return [];
   const placeholders = normalized.map(() => "?").join(", ");
   return getAll(
-    `SELECT id, user_id FROM chat_messages WHERE id IN (${placeholders})`,
+    `SELECT id, user_id, client_request_id FROM chat_messages WHERE id IN (${placeholders})`,
     normalized,
   );
 }

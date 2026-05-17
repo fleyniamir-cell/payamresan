@@ -36,10 +36,10 @@ export default function ChatsListPanel({
   setActiveChatId,
   setActivePeer,
   setMobileTab,
-  setIsAtBottom,
+  setIsAtBottom: _setIsAtBottom,
   setUnreadInChat,
   lastMessageIdRef,
-  isAtBottomRef,
+  isAtBottomRef: _isAtBottomRef,
   chatsSearchQuery,
   chatsSearchFocused,
   discoverLoading,
@@ -776,8 +776,6 @@ export default function ChatsListPanel({
                   if (window.matchMedia("(max-width: 767px)").matches) {
                     setMobileTab("chat");
                   }
-                  isAtBottomRef.current = true;
-                  setIsAtBottom(true);
                   setUnreadInChat(0);
                   lastMessageIdRef.current = null;
                 }}

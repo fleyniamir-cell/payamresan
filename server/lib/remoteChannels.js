@@ -579,6 +579,9 @@ function createRemoteChannelManager(deps = {}) {
     markRemoteChannelQueueItemDone,
     markRemoteChannelQueueItemRetry,
     markRemoteChannelQueueItemSkipped,
+    skipAllRemoteChannelQueueItems: skipAllRemoteChannelQueueItemsDb,
+    skipCurrentRemoteChannelQueueItem: skipCurrentRemoteChannelQueueItemDb,
+    getCurrentRemoteChannelQueueItemId,
     path,
     probeVideoMetadata,
     sanitizeDurationSeconds,
@@ -599,10 +602,13 @@ function createRemoteChannelManager(deps = {}) {
   const enabled = Boolean(config.enabled && apiId && apiHash && sessionString);
   const pollIntervalMs = Math.max(1000, Number(config.pollIntervalMs || 5000));
   const pollLimit = Math.max(1, Math.min(100, Number(config.telegramPollLimit || 50)));
+  // Sync metadata once every 60 poll cycles (e.g., every 5 minutes if polling every 5s)
+  const metadataSyncIntervalMs = pollIntervalMs * 60;
   const queueIntervalMs = Math.max(250, Number(config.queueIntervalMs || 1000));
   const maxAttempts = Math.max(1, Number(config.queueMaxAttempts || 10));
   const staleLockMs = Math.max(10_000, Number(config.queueStaleLockMs || 5 * 60_000));
   const queueBatchSize = Math.max(1, Math.min(50, Number(config.queueBatchSize || 10)));
+  const queueConcurrency = Math.max(1, Math.min(50, Number(config.queueConcurrency || 3)));
   const providerStateHeartbeatMs = Math.max(
     pollIntervalMs,
     Number(config.providerStateHeartbeatMs || 60_000),
@@ -629,6 +635,7 @@ function createRemoteChannelManager(deps = {}) {
   const avatarUploadRootDir = String(config.avatarUploadRootDir || "").trim();
   const lockOwner = `songbird-${process.pid}`;
   const entityCache = new Map();
+  const metadataSyncTimestamps = new Map(); // sourceId → lastSyncTimestamp
   const connectionOptions = getTelegramClientConnectionOptions(config.proxyUrl, (message) =>
     console.warn(message),
   );
@@ -642,6 +649,12 @@ function createRemoteChannelManager(deps = {}) {
   let clientResetRequired = false;
   let clientResetReason = "";
   let lastProviderStateSavedAt = 0;
+
+  // Set of queue item IDs that have been aborted while in-flight. The worker
+  // checks this at each async yield point and stops processing the item early.
+  const abortedItemIds = new Set();
+  // Set of source IDs for which ALL active items should be aborted.
+  const abortedSourceIds = new Set();
 
   const log = (...args) => debugLog("remote-channel", ...args);
 
@@ -746,7 +759,10 @@ function createRemoteChannelManager(deps = {}) {
     client = null;
     clientResetRequired = false;
     clientResetReason = "";
-    entityCache.clear();
+    // Entity cache is intentionally preserved across client resets: the resolved
+    // Telegram entities (channel IDs, usernames) remain valid after a reconnect,
+    // so clearing the cache would only add unnecessary getEntity() round-trips on
+    // the first poll cycle after every reconnection.
     if (staleClient) {
       log("client:reset", { reason });
       await destroyTelegramClient(staleClient, reason);
@@ -857,7 +873,10 @@ function createRemoteChannelManager(deps = {}) {
     const title = resolveEntityTitle(entity, source);
     const username = resolveEntityUsername(entity, source);
     const sourceChatId = resolveEntityChatId(entity, source);
-    const avatarUrl = await cacheSourceAvatar(activeClient, source, entity);
+    // Skip avatar download when file uploads are disabled — only sync the name.
+    const avatarUrl = fileUploadEnabled
+      ? await cacheSourceAvatar(activeClient, source, entity)
+      : source?.source_avatar_url || "";
 
     return { entity, title, username, sourceChatId, avatarUrl };
   }
@@ -945,14 +964,24 @@ function createRemoteChannelManager(deps = {}) {
 
   async function pollSource(activeClient, source) {
     const syncMetadata = Boolean(Number(source.sync_metadata || 0));
+    const sourceId = Number(source.id);
+    const now = Date.now();
+    const lastMetadataSync = metadataSyncTimestamps.get(sourceId) || 0;
+    const shouldForceRefresh =
+      syncMetadata && now - lastMetadataSync >= metadataSyncIntervalMs;
+
     const resolved = await syncResolvedSourceMetadata(
       activeClient,
       source,
       await resolveSource(activeClient, source, {
-        forceRefresh: syncMetadata,
+        forceRefresh: shouldForceRefresh,
       }),
       { touch: false },
     );
+
+    if (shouldForceRefresh) {
+      metadataSyncTimestamps.set(sourceId, now);
+    }
     const lastMessageId = Number(source?.last_remote_message_id || 0) || 0;
     if (!lastMessageId) {
       const latest = await activeClient.getMessages(resolved.entity, { limit: 1 });
@@ -1038,20 +1067,35 @@ function createRemoteChannelManager(deps = {}) {
     }
 
     const activeClient = await ensureClient();
-    for (const source of sources) {
+
+    // Poll all sources concurrently (up to queueConcurrency at a time) so that
+    // a slow or large source does not delay all subsequent sources.
+    let clientResetNeeded = false;
+    for (let i = 0; i < sources.length; i += queueConcurrency) {
       if (stopped) return;
-      try {
-        await pollSource(activeClient, source);
-        if (source.last_error) {
-          updateRemoteChannelSourceError(source.id, "");
-        }
-      } catch (error) {
-        const message = errorMessage(error);
-        updateRemoteChannelSourceError(source.id, message);
-        log("poll-source:error", { sourceId: Number(source.id), error: message });
-        if (markTelegramClientForReset(error, "poll-source")) {
-          throw error;
-        }
+      const batch = sources.slice(i, i + queueConcurrency);
+      await Promise.all(
+        batch.map(async (source) => {
+          if (stopped) return;
+          try {
+            await pollSource(activeClient, source);
+            if (source.last_error) {
+              updateRemoteChannelSourceError(source.id, "");
+            }
+          } catch (error) {
+            const message = errorMessage(error);
+            updateRemoteChannelSourceError(source.id, message);
+            log("poll-source:error", { sourceId: Number(source.id), error: message });
+            if (markTelegramClientForReset(error, "poll-source")) {
+              clientResetNeeded = true;
+            }
+          }
+        }),
+      );
+      // If any source triggered a client reset, propagate the error so the
+      // poll loop can reconnect before attempting the next batch.
+      if (clientResetNeeded) {
+        throw new Error(clientResetReason || "Telegram client needs reconnect.");
       }
     }
 
@@ -1087,6 +1131,14 @@ function createRemoteChannelManager(deps = {}) {
           });
           lastProviderStateSavedAt = Date.now();
           log("poll:error", { error: message });
+          
+          // If this is a connection error and the client is marked for reset,
+          // force a client reset before the next poll attempt to avoid getting
+          // stuck in a loop where ensureClient() keeps failing.
+          if (isTelegramConnectionError(error) && (clientResetRequired || shouldResetTelegramClient(client))) {
+            log("poll:forcing-client-reset", { reason: clientResetReason || message });
+            await resetTelegramClient(clientResetReason || `poll error: ${message}`);
+          }
         }
         await sleep(pollIntervalMs);
       }
@@ -1535,6 +1587,16 @@ function createRemoteChannelManager(deps = {}) {
   }
 
   async function processQueueItem(item) {
+    const throwIfAborted = () => {
+      if (
+        abortedItemIds.has(Number(item.id)) ||
+        abortedSourceIds.has(Number(item.source_id))
+      ) {
+        throw Object.assign(new Error("Queue item was manually skipped."), { isAbort: true });
+      }
+    };
+
+    throwIfAborted();
     const currentSource =
       typeof getRemoteChannelSourceById === "function"
         ? getRemoteChannelSourceById(item.source_id)
@@ -1622,6 +1684,9 @@ function createRemoteChannelManager(deps = {}) {
 
     const ensureMessage = (fallbackBody = "", options = {}) => {
       if (messageId) return messageId;
+      // Check abort before creating the message — once it's created and the
+      // SSE event is emitted, the message is already visible in the channel.
+      throwIfAborted();
       messageBody =
         body ||
         String(fallbackBody || "").trim() ||
@@ -1686,6 +1751,7 @@ function createRemoteChannelManager(deps = {}) {
     }
 
     if (shouldStreamMedia) {
+      throwIfAborted();
       const activeClient = await ensureClient();
       const resolved = await resolveSource(activeClient, currentSource);
       await streamTelegramMediaFiles({
@@ -1728,6 +1794,14 @@ function createRemoteChannelManager(deps = {}) {
     try {
       await processQueueItem(item);
     } catch (error) {
+      if (error?.isAbort) {
+        // Item was manually skipped while in-flight. The DB row was already
+        // marked skipped by the abort call; just clean up the in-memory set.
+        abortedItemIds.delete(Number(item.id));
+        markRemoteChannelQueueItemSkipped(item.id, "Manually skipped.");
+        log("queue:aborted", { id: Number(item.id) });
+        return;
+      }
       const attempts = Number(item?.attempts || 0) + 1;
       const failed = attempts >= maxAttempts;
       const message = errorMessage(error);
@@ -1745,15 +1819,39 @@ function createRemoteChannelManager(deps = {}) {
   async function runQueueOnce() {
     const staleBefore = new Date(Date.now() - staleLockMs).toISOString();
     releaseStaleRemoteChannelQueueItems(staleBefore);
+
+    // Claim the full batch up-front, then process items concurrently across
+    // different sources. Items from the same source are processed sequentially
+    // to preserve chronological mirroring order.
+    const items = [];
     for (let index = 0; index < queueBatchSize; index += 1) {
-      if (stopped) return;
+      if (stopped) break;
       const item = claimNextRemoteChannelQueueItem(
         lockOwner,
         new Date().toISOString(),
       );
-      if (!item?.id) return;
-      await processClaimedItem(item);
+      if (!item?.id) break;
+      items.push(item);
     }
+    if (!items.length) return;
+
+    // Group by source_id so each source's items run in order.
+    const bySource = new Map();
+    for (const item of items) {
+      const key = Number(item.source_id);
+      if (!bySource.has(key)) bySource.set(key, []);
+      bySource.get(key).push(item);
+    }
+
+    // Run each source's chain concurrently with other sources.
+    await Promise.all(
+      [...bySource.values()].map((sourceItems) =>
+        sourceItems.reduce(
+          (chain, item) => chain.then(() => processClaimedItem(item)),
+          Promise.resolve(),
+        ),
+      ),
+    );
   }
 
   async function runQueueLoop() {
@@ -1801,11 +1899,84 @@ function createRemoteChannelManager(deps = {}) {
     }
   }
 
+  async function testConnection(sourceId) {
+    const source = getRemoteChannelSourceById(sourceId);
+    if (!source?.id) {
+      throw new Error("Remote channel source not found.");
+    }
+
+    if (!source.enabled) {
+      throw new Error("Remote channel is disabled.");
+    }
+
+    if (source.provider !== "telegram") {
+      throw new Error("Only Telegram sources are supported.");
+    }
+
+    // Ensure we have a connected client
+    await ensureClient();
+    
+    try {
+      // Try to get the channel entity
+      const entity = await client.getEntity(
+        source.source_username || source.source_chat_id
+      );
+      
+      if (!entity) {
+        throw new Error("Unable to find the target channel.");
+      }
+
+      // Try to get the latest message to verify we have access
+      const messages = await client.getMessages(entity, { limit: 1 });
+      
+      return {
+        success: true,
+        channelTitle: entity.title || source.source_username,
+        channelId: entity.id?.toString(),
+        hasAccess: true,
+        latestMessageId: messages?.[0]?.id || null,
+      };
+    } catch (error) {
+      throw new Error(
+        `Connection test failed: ${error?.message || "Unable to access channel"}`
+      );
+    }
+  }
+
+  function abortQueueItem(sourceId) {
+    const id = Number(sourceId || 0);
+    if (!id) return 0;
+    const itemId = getCurrentRemoteChannelQueueItemId(id);
+    // Mark the lowest active item in the DB as skipped.
+    const count = skipCurrentRemoteChannelQueueItemDb(id);
+    // Signal abort for the specific in-flight item only.
+    if (itemId) {
+      abortedItemIds.add(itemId);
+      setTimeout(() => abortedItemIds.delete(itemId), queueIntervalMs * 2 + staleLockMs);
+    }
+    return count;
+  }
+
+  function abortAllQueueItems(sourceId) {
+    const id = Number(sourceId || 0);
+    if (!id) return 0;
+    // Signal all in-flight items for this source to stop at the next yield.
+    abortedSourceIds.add(id);
+    // Clear the source-level abort flag after a window long enough to cover
+    // any currently in-flight batch.
+    setTimeout(() => abortedSourceIds.delete(id), staleLockMs);
+    // Mark all pending/retry/processing DB rows as skipped.
+    return skipAllRemoteChannelQueueItemsDb(id);
+  }
+
   return {
     start,
     stop,
     isEnabled: () => enabled,
     syncSourceMetadata,
+    testConnection,
+    abortQueueItem,
+    abortAllQueueItems,
   };
 }
 

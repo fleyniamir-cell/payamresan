@@ -459,6 +459,8 @@ nano .env
 | `MESSAGE_TEXT_RETENTION` | `integer` | `0` | Auto-delete text-only messages after N days (`0` disables). |
 | `MESSAGE_MAX_CHARS` | `integer` | `4000` | Max message length. |
 | `REMOTE_CHANNEL` | `boolean` | `false` | Enable the server-side Remote Channel worker. |
+| `REMOTE_CHANNEL_UI` | `boolean` | `true` | Allow channel owners to enable Remote Channel in the UI. When `false`, the Remote Channel toggle is disabled and locked for all channels, and existing channels with it enabled will see it turn off automatically in the UI. |
+| `REMOTE_CHANNEL_MEDIA_STREAM` | `boolean` | `true` | Allow channel owners to enable the "Stream Media Files" option in the UI. When `false`, the option is disabled and locked for all channels. |
 | `REMOTE_CHANNEL_TELEGRAM_API_ID` | `integer` | `0` | Telegram API ID. |
 | `REMOTE_CHANNEL_TELEGRAM_API_HASH` | `string` | `""` | Telegram API hash. |
 | `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` | `string` | `""` | Telegram StringSession. Treat it like a password. |
@@ -468,6 +470,7 @@ nano .env
 | `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `integer` | `1000` | How often the mirror queue worker processes pending Telegram posts. |
 | `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `integer` | `10` | Max retry attempts before a queued remote post is marked failed. |
 | `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `integer` | `10` | Max queued remote posts processed per worker tick (`1`-`50`). |
+| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `integer` | `3` | How many queued items are processed concurrently per worker tick. Also controls how many Telegram sources are polled in parallel. |
 | `REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS` | `integer` | `300000` | Age after which an in-progress queue lock is considered stale and can be retried. |
 | `CHAT_PENDING_TEXT_TIMEOUT` | `integer` | `300000` | Mark pending text message as failed after this timeout (milliseconds). |
 | `CHAT_PENDING_FILE_TIMEOUT` | `integer` | `1200000` | Mark pending file message as failed / XHR timeout for uploads (milliseconds). |
@@ -490,6 +493,7 @@ nano .env
 | `VAPID_PUBLIC_KEY` | `string` | auto-generated | Web Push public key (required for push notifications). |
 | `VAPID_PRIVATE_KEY` | `string` | auto-generated | Web Push private key (required for push notifications). |
 | `VAPID_SUBJECT` | `string` | auto-generated | Contact for VAPID (email or URL). Used by push providers. |
+| `PUSH_PROXY_URL` | `string` | `""` | Proxy URL for push notification delivery. Use when your server cannot directly reach push service endpoints. |
 
 > [!NOTE]
 > **Push notifications require HTTPS** (except `localhost` for development). iOS requires an installed PWA (iOS 16.4+).
@@ -581,6 +585,49 @@ Optional channel settings:
 - **Stream Media Files** downloads Telegram media into Songbird uploads when `FILE_UPLOAD=true`. It follows the upload size/count limits, file retention, encryption-at-rest, and video transcoding settings. Text-only mirrored posts follow `MESSAGE_TEXT_RETENTION`.
 - Posts with no text/caption are mirrored only when media streaming is enabled and at least one supported media file can be stored.
 
+## Push Notification Proxy Configuration
+
+If your server cannot reach push service endpoints (Google FCM, Mozilla Push Service, Apple Push) due to firewall restrictions or network policies, configure a proxy:
+
+### 1. Set proxy in `.env`:
+```bash
+PUSH_PROXY_URL="http://your-proxy-server:3128"
+```
+
+### 2. Restart service:
+```bash
+sudo systemctl restart songbird
+```
+
+### 3. Verify in logs:
+```bash
+journalctl -u songbird -f | grep push
+# Should show: [push] Using proxy: http://your-proxy-server:3128
+```
+
+**Proxy URL formats:**
+- HTTP: `http://proxy.example.com:3128`
+- With authentication: `http://username:password@proxy.example.com:8080`
+- SOCKS5: `socks5://proxy.example.com:1080`
+
+**Required endpoints** (proxy must allow HTTPS/443 to):
+- `fcm.googleapis.com` (Chrome/Edge)
+- `*.push.services.mozilla.com` (Firefox)
+- `web.push.apple.com` (Safari)
+- `*.notify.windows.com` (Edge)
+
+**Troubleshooting push delivery failures:**
+
+If you see errors like `[push] delivery failed ... status=0 ... AggregateError` in logs, this indicates network connectivity issues reaching push services. Common causes:
+- Firewall blocking outbound HTTPS connections
+- DNS resolution failures
+- Network restrictions requiring proxy usage
+
+Test proxy connectivity:
+```bash
+curl -x http://your-proxy:3128 https://fcm.googleapis.com
+```
+
 ## Updating the deployed app
 
 > [!WARNING]
@@ -638,8 +685,11 @@ You can use these commands while in `/opt/songbird/server` directory to manage y
 - Reset DB: `npm run db:reset`
 - Delete DB: `npm run db:delete`
 - Create a group or channel: `npm run db:chat:create`
+- Create a channel with Remote Channel: `npm run db:chat:create -- --type channel --name "My Channel" --owner alice --username my_channel --remote-channel <telegram-source> [--sync-metadata] [--stream-media]`
 - Add users to a group/channel: `npm run db:chat:add`
 - Edit a group/channel profile or transfer ownership: `npm run db:chat:edit`
+- Edit Remote Channel configuration: `npm run db:chat:edit -- <channel> --remote-channel <telegram-source> [--sync-metadata | --no-sync-metadata] [--stream-media | --no-stream-media]`
+- Manage Remote Channel queue: `npm run db:chat:edit -- <channel> [--enable-remote | --disable-remote | --pause-queue | --resume-queue | --skip-queue | --skip-all-queue]`
 - Delete chats (all or selected ids/usernames): `npm run db:chat:delete` (requires `--all` to delete everything)
 - Delete files (all or selected ids/filenames): `npm run db:file:delete` (requires `--all` to delete everything)
 - Edit a user profile: `npm run db:user:edit`
@@ -718,6 +768,11 @@ Add users to a group or channel:
 
 ```bash
 cd server
+
+# Create a channel with Remote Channel
+npm run db:chat:create -- --type channel --name "My Channel" --owner alice --username my_channel --remote-channel @telegram_source --sync-metadata --stream-media
+
+# Add users to a chat
 npm run db:chat:add -- core.team songbird.sage2 songbird.sage3
 
 # You can also use chat Id:
@@ -732,6 +787,19 @@ npm run db:chat:edit -- core.team --name "Core Team HQ" --visibility public --co
 
 # You can also use chat Id:
 npm run db:chat:edit -- 1 --owner songbird.sage2
+
+# Update Remote Channel configuration:
+npm run db:chat:edit -- my_channel --remote-channel @new_telegram_source
+npm run db:chat:edit -- my_channel --sync-metadata
+npm run db:chat:edit -- my_channel --no-stream-media
+
+# Manage Remote Channel:
+npm run db:chat:edit -- my_channel --enable-remote
+npm run db:chat:edit -- my_channel --disable-remote
+npm run db:chat:edit -- my_channel --pause-queue
+npm run db:chat:edit -- my_channel --resume-queue
+npm run db:chat:edit -- my_channel --skip-queue
+npm run db:chat:edit -- my_channel --skip-all-queue
 ```
 
 Edit a user profile:

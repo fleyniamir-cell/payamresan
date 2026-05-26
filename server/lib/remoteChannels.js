@@ -64,6 +64,69 @@ function errorMessage(error) {
     .slice(0, 1000);
 }
 
+/**
+ * Normalize a Songbird remote channel source value.
+ *
+ * Accepts a Songbird invite link in the form:
+ *   https://example.com/invite/<username>
+ *   https://example.com/invite/<token>
+ *
+ * Returns { ok, sourceRaw, sourceUrl, sourceUsername, displayName }
+ * where sourceUrl is the base origin of the target server and
+ * sourceUsername is the channel username (if resolvable from the URL).
+ */
+function normalizeSongbirdSource(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { ok: false, error: "Songbird source is required." };
+  }
+
+  if (!/^https?:\/\//i.test(raw)) {
+    return {
+      ok: false,
+      error: "Songbird source must be a full invite URL (https://...).",
+    };
+  }
+
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: "Songbird source URL is invalid." };
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, error: "Songbird source URL must use http or https." };
+  }
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  // Expect /invite/<username-or-token>
+  if (parts[0] !== "invite" || !parts[1]) {
+    return {
+      ok: false,
+      error:
+        "Songbird source must be a channel invite link (e.g. https://example.com/invite/channelname).",
+    };
+  }
+
+  const inviteTarget = parts[1];
+  const sourceUrl = url.origin; // base URL of the target server
+
+  // If the invite target looks like a username (alphanumeric + dots + underscores),
+  // treat it as the channel username. Otherwise it's an invite token.
+  const looksLikeUsername = /^[a-z0-9._]{3,}$/i.test(inviteTarget);
+  const sourceUsername = looksLikeUsername ? inviteTarget.toLowerCase() : "";
+
+  return {
+    ok: true,
+    sourceRaw: raw,
+    sourceUrl,
+    sourceUsername,
+    inviteTarget,
+    displayName: sourceUsername ? `@${sourceUsername}` : inviteTarget,
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, Math.max(0, Number(ms) || 0));
@@ -328,6 +391,24 @@ function buildTelegramOriginLabel(source = {}) {
     .replace(/^@+/, "");
   if (username) return `Telegram: @${username}`;
   return "Telegram channel";
+}
+
+function buildSongbirdOriginLabel(source = {}) {
+  const title = String(source?.title || source?.source_title || "").trim();
+  if (title) return `Songbird: ${title}`;
+  const username = String(source?.username || source?.source_username || "")
+    .trim()
+    .replace(/^@+/, "");
+  if (username) return `Songbird: @${username}`;
+  const sourceUrl = String(source?.source_url || "").trim();
+  if (sourceUrl) {
+    try {
+      return `Songbird: ${new URL(sourceUrl).hostname}`;
+    } catch {
+      return `Songbird: ${sourceUrl}`;
+    }
+  }
+  return "Songbird channel";
 }
 
 function computeTextExpiryIso(retentionDays) {
@@ -1924,8 +2005,38 @@ function createRemoteChannelManager(deps = {}) {
       throw new Error("Remote channel is disabled.");
     }
 
+    if (source.provider === "songbird") {
+      // For Songbird sources, just verify the target server is reachable and
+      // the channel is still public. No persistent connection to maintain.
+      const sourceUrl = String(source.source_url || source.source_raw || "").trim();
+      if (!sourceUrl) {
+        throw new Error("Songbird source URL is not configured.");
+      }
+      const channelUsername = String(source.source_username || "").trim();
+      if (!channelUsername) {
+        throw new Error("Songbird source channel username is not resolved.");
+      }
+      // Verify the target server is reachable and the channel is public
+      const previewUrl = `${sourceUrl}/api/chats/${encodeURIComponent(channelUsername)}/public-preview`;
+      const response = await fetch(previewUrl, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || `Target server returned ${response.status}.`);
+      }
+      const data = await response.json();
+      return {
+        success: true,
+        channelTitle: data?.name || channelUsername,
+        hasAccess: true,
+      };
+    }
+
     if (source.provider !== "telegram") {
-      throw new Error("Only Telegram sources are supported.");
+      throw new Error(`Unsupported provider: ${source.provider}`);
     }
 
     // Ensure we have a connected client
@@ -1998,6 +2109,7 @@ function createRemoteChannelManager(deps = {}) {
 export {
   createRemoteChannelManager,
   getTelegramClientConnectionOptions,
+  normalizeSongbirdSource,
   normalizeTelegramSource,
   parseTelegramProxy,
 };

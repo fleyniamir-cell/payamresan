@@ -5434,7 +5434,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       visibility: "public",
       allowMemberInvites: true,
       remoteChannelEnabled: false,
-      remoteChannelProvider: "telegram",
+      remoteChannelProvider: appInfo?.remoteChannels?.telegramConfigured ? "telegram" : "songbird",
       remoteChannelSource: "",
       remoteChannelSyncMetadata: false,
       remoteChannelStreamMedia: false,
@@ -5630,7 +5630,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       visibility: activeChat.group_visibility || "public",
       allowMemberInvites: Boolean(Number(activeChat.allow_member_invites || 0)),
       remoteChannelEnabled: false,
-      remoteChannelProvider: "telegram",
+      remoteChannelProvider: appInfo?.remoteChannels?.telegramConfigured ? "telegram" : "songbird",
       remoteChannelSource: "",
       remoteChannelSyncMetadata: false,
       remoteChannelStreamMedia: false,
@@ -5828,6 +5828,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       : null;
     const originalEnabled =
       Boolean(originalRemoteChannel?.enabled);
+    const originalProvider = String(originalRemoteChannel?.provider || "telegram").toLowerCase();
     const originalSource =
       originalRemoteChannel?.sourceRaw ||
       (originalRemoteChannel?.sourceUsername
@@ -5841,6 +5842,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       Boolean(originalRemoteChannel?.streamMedia);
     const remoteChannelChanged =
       remoteChannelEnabled !== originalEnabled ||
+      remoteChannelProvider !== originalProvider ||
       remoteChannelSource !== originalSource ||
       remoteChannelSyncMetadata !== originalSyncMetadata ||
       remoteChannelStreamMedia !== originalStreamMedia;
@@ -6656,6 +6658,12 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             remoteChannelAvailable={Boolean(
               appInfo?.remoteChannels?.enabled &&
               appInfo?.remoteChannels?.uiEnabled
+            )}
+            remoteChannelTelegramAvailable={Boolean(
+              appInfo?.remoteChannels?.telegramConfigured
+            )}
+            remoteChannelSongbirdAvailable={Boolean(
+              appInfo?.remoteChannels?.songbirdConfigured
             )}
             remoteChannelMediaStreamAllowed={Boolean(
               appInfo?.remoteChannels?.mediaStreamEnabled

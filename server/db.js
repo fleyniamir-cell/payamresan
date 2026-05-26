@@ -504,11 +504,11 @@ const normalizeRemoteSourceChatId = (value) => {
 export function getRemoteChannelSourceByChatId(chatId) {
   return getRow(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
-            source_title, source_avatar_url, last_remote_message_id, enabled,
-            paused, source_version, sync_metadata, stream_media, last_error,
-            last_seen_at, created_at, updated_at
+            source_url, source_title, source_avatar_url, last_remote_message_id,
+            enabled, paused, source_version, sync_metadata, stream_media,
+            last_error, last_seen_at, created_at, updated_at
      FROM remote_channel_sources
-     WHERE chat_id = ? AND provider = 'telegram'`,
+     WHERE chat_id = ?`,
     [Number(chatId)],
   );
 }
@@ -516,11 +516,11 @@ export function getRemoteChannelSourceByChatId(chatId) {
 export function getRemoteChannelSourceById(sourceId) {
   return getRow(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
-            source_title, source_avatar_url, last_remote_message_id, enabled,
-            paused, source_version, sync_metadata, stream_media, last_error,
-            last_seen_at, created_at, updated_at
+            source_url, source_title, source_avatar_url, last_remote_message_id,
+            enabled, paused, source_version, sync_metadata, stream_media,
+            last_error, last_seen_at, created_at, updated_at
      FROM remote_channel_sources
-     WHERE id = ? AND provider = 'telegram'`,
+     WHERE id = ?`,
     [Number(sourceId)],
   );
 }
@@ -529,10 +529,11 @@ export function upsertRemoteChannelSource(payload = {}) {
   const chatId = Number(payload.chatId || 0);
   if (!chatId) return null;
 
-  const provider = "telegram";
+  const provider = String(payload.provider || "telegram").toLowerCase();
   const sourceRaw = String(payload.sourceRaw || "").trim() || null;
   const sourceChatId = normalizeRemoteSourceChatId(payload.sourceChatId);
   const sourceUsername = normalizeRemoteSourceUsername(payload.sourceUsername);
+  const sourceUrl = String(payload.sourceUrl || "").trim() || null;
   const enabled = payload.enabled ? 1 : 0;
   const syncMetadata = payload.syncMetadata ? 1 : 0;
   const streamMedia = payload.streamMedia ? 1 : 0;
@@ -541,7 +542,9 @@ export function upsertRemoteChannelSource(payload = {}) {
     current?.id &&
       (String(current.source_raw || "") !== String(sourceRaw || "") ||
         String(current.source_chat_id || "") !== String(sourceChatId || "") ||
-        String(current.source_username || "") !== String(sourceUsername || "")),
+        String(current.source_username || "") !== String(sourceUsername || "") ||
+        String(current.source_url || "") !== String(sourceUrl || "") ||
+        String(current.provider || "telegram") !== provider),
   );
   const currentSourceVersion = Math.max(
     1,
@@ -554,15 +557,18 @@ export function upsertRemoteChannelSource(payload = {}) {
   run(
     `INSERT INTO remote_channel_sources (
        chat_id, provider, source_raw, source_chat_id, source_username,
-       source_version, sync_metadata, stream_media, enabled, last_error, updated_at
+       source_url, source_version, sync_metadata, stream_media, enabled,
+       last_error, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
      ON CONFLICT(chat_id) DO UPDATE SET
        provider = excluded.provider,
        source_title = CASE
          WHEN COALESCE(remote_channel_sources.source_raw, '') != COALESCE(excluded.source_raw, '')
            OR COALESCE(remote_channel_sources.source_chat_id, '') != COALESCE(excluded.source_chat_id, '')
            OR COALESCE(remote_channel_sources.source_username, '') != COALESCE(excluded.source_username, '')
+           OR COALESCE(remote_channel_sources.source_url, '') != COALESCE(excluded.source_url, '')
+           OR remote_channel_sources.provider != excluded.provider
          THEN NULL
          ELSE remote_channel_sources.source_title
        END,
@@ -570,6 +576,8 @@ export function upsertRemoteChannelSource(payload = {}) {
          WHEN COALESCE(remote_channel_sources.source_raw, '') != COALESCE(excluded.source_raw, '')
            OR COALESCE(remote_channel_sources.source_chat_id, '') != COALESCE(excluded.source_chat_id, '')
            OR COALESCE(remote_channel_sources.source_username, '') != COALESCE(excluded.source_username, '')
+           OR COALESCE(remote_channel_sources.source_url, '') != COALESCE(excluded.source_url, '')
+           OR remote_channel_sources.provider != excluded.provider
          THEN NULL
          ELSE remote_channel_sources.source_avatar_url
        END,
@@ -577,12 +585,15 @@ export function upsertRemoteChannelSource(payload = {}) {
          WHEN COALESCE(remote_channel_sources.source_raw, '') != COALESCE(excluded.source_raw, '')
            OR COALESCE(remote_channel_sources.source_chat_id, '') != COALESCE(excluded.source_chat_id, '')
            OR COALESCE(remote_channel_sources.source_username, '') != COALESCE(excluded.source_username, '')
+           OR COALESCE(remote_channel_sources.source_url, '') != COALESCE(excluded.source_url, '')
+           OR remote_channel_sources.provider != excluded.provider
          THEN NULL
          ELSE remote_channel_sources.last_remote_message_id
        END,
        source_raw = excluded.source_raw,
        source_chat_id = excluded.source_chat_id,
        source_username = excluded.source_username,
+       source_url = excluded.source_url,
        source_version = excluded.source_version,
        sync_metadata = excluded.sync_metadata,
        stream_media = excluded.stream_media,
@@ -595,6 +606,7 @@ export function upsertRemoteChannelSource(payload = {}) {
       sourceRaw,
       sourceChatId,
       sourceUsername,
+      sourceUrl,
       sourceVersion,
       syncMetadata,
       streamMedia,
@@ -628,9 +640,9 @@ export function upsertRemoteChannelSource(payload = {}) {
 export function listEnabledRemoteChannelSources(provider = "telegram") {
   return getAll(
     `SELECT id, chat_id, provider, source_raw, source_chat_id, source_username,
-            source_title, source_avatar_url, last_remote_message_id, enabled,
-            paused, source_version, sync_metadata, stream_media, last_error,
-            last_seen_at, created_at, updated_at
+            source_url, source_title, source_avatar_url, last_remote_message_id,
+            enabled, paused, source_version, sync_metadata, stream_media,
+            last_error, last_seen_at, created_at, updated_at
      FROM remote_channel_sources
      WHERE provider = ? AND enabled = 1 AND paused = 0
      ORDER BY id ASC`,
@@ -863,7 +875,7 @@ export function enqueueRemoteChannelQueueItem(payload = {}) {
   const sourceId = Number(payload.sourceId || 0);
   if (!sourceId) return null;
 
-  const provider = "telegram";
+  const provider = String(payload.provider || "telegram").toLowerCase();
   const telegramUpdateId = Number.isFinite(Number(payload.telegramUpdateId))
     ? Math.trunc(Number(payload.telegramUpdateId))
     : null;
@@ -963,8 +975,7 @@ export function claimNextRemoteChannelQueueItem(lockOwner, nowIso) {
      FROM remote_channel_queue q
      JOIN remote_channel_sources s ON s.id = q.source_id
      JOIN chats c ON c.id = s.chat_id
-     WHERE q.provider = 'telegram'
-       AND s.provider = 'telegram'
+     WHERE q.provider = s.provider
        AND s.enabled = 1
        AND s.paused = 0
        AND q.source_version = s.source_version

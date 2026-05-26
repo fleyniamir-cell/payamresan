@@ -25,6 +25,8 @@ import { migration024RemoteChannelQueue } from "./024-remote-channel-queue.js";
 import { migration025RemoteChannelPerformance } from "./025-remote-channel-performance.js";
 import { migration026RemoteChannelPause } from "./026-remote-channel-pause.js";
 
+import { migration027RemoteChannelSongbird } from "./027-remote-channel-songbird.js";
+
 export const migrations = [
   migration001InitialSchema,
   migration002LegacyChatRename,
@@ -52,4 +54,5 @@ export const migrations = [
   migration024RemoteChannelQueue,
   migration025RemoteChannelPerformance,
   migration026RemoteChannelPause,
+  migration027RemoteChannelSongbird,
 ];

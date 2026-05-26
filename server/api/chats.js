@@ -1,5 +1,5 @@
 import { createInviteToken } from "../lib/inviteTokens.js";
-import { normalizeTelegramSource } from "../lib/remoteChannels.js";
+import { normalizeSongbirdSource, normalizeTelegramSource } from "../lib/remoteChannels.js";
 
 function registerChatRoutes(app, deps) {
   const {
@@ -110,6 +110,8 @@ function registerChatRoutes(app, deps) {
     String(chat?.group_visibility || "public").trim().toLowerCase() ===
     "public";
   const isRemoteChannelAvailable = () =>
+    Boolean(REMOTE_CHANNELS?.enabled);
+  const isTelegramAvailable = () =>
     Boolean(REMOTE_CHANNELS?.enabled && REMOTE_CHANNELS?.telegramConfigured);
   const normalizeCreateRemoteChannel = ({
     remoteChannel,
@@ -151,11 +153,19 @@ function registerChatRoutes(app, deps) {
     }
 
     const provider = String(remoteChannel.provider || "telegram").toLowerCase();
-    if (provider !== "telegram") {
+    if (provider !== "telegram" && provider !== "songbird") {
       return {
         shouldSave: true,
         error: "Remote Channel source is invalid.",
         status: 400,
+      };
+    }
+
+    if (provider === "telegram" && !isTelegramAvailable()) {
+      return {
+        shouldSave: true,
+        error: "Telegram Remote Channel is not configured on this server.",
+        status: 503,
       };
     }
 
@@ -164,27 +174,44 @@ function registerChatRoutes(app, deps) {
       sourceRaw: rawSource,
       sourceChatId: "",
       sourceUsername: "",
+      sourceUrl: "",
     };
-    if (enabled) {
-      normalized = normalizeTelegramSource(rawSource);
-      if (!normalized.ok) {
+
+    if (provider === "telegram") {
+      if (enabled) {
+        normalized = normalizeTelegramSource(rawSource);
+        if (!normalized.ok) {
+          return { shouldSave: true, error: normalized.error, status: 400 };
+        }
+      } else if (rawSource) {
+        const optionalNormalized = normalizeTelegramSource(rawSource);
+        if (optionalNormalized.ok) normalized = optionalNormalized;
+      }
+      if (enabled && !normalized.sourceChatId && !normalized.sourceUsername) {
         return {
           shouldSave: true,
-          error: normalized.error,
+          error: "Telegram source is required.",
           status: 400,
         };
       }
-    } else if (rawSource) {
-      const optionalNormalized = normalizeTelegramSource(rawSource);
-      if (optionalNormalized.ok) normalized = optionalNormalized;
-    }
-
-    if (enabled && !normalized.sourceChatId && !normalized.sourceUsername) {
-      return {
-        shouldSave: true,
-        error: "Telegram source is required.",
-        status: 400,
-      };
+    } else {
+      // provider === "songbird"
+      if (enabled) {
+        normalized = normalizeSongbirdSource(rawSource);
+        if (!normalized.ok) {
+          return { shouldSave: true, error: normalized.error, status: 400 };
+        }
+      } else if (rawSource) {
+        const optionalNormalized = normalizeSongbirdSource(rawSource);
+        if (optionalNormalized.ok) normalized = optionalNormalized;
+      }
+      if (enabled && !normalized.sourceUrl) {
+        return {
+          shouldSave: true,
+          error: "Songbird source URL is required.",
+          status: 400,
+        };
+      }
     }
 
     return {
@@ -192,8 +219,9 @@ function registerChatRoutes(app, deps) {
       enabled,
       provider,
       sourceRaw: normalized.sourceRaw,
-      sourceChatId: normalized.sourceChatId,
-      sourceUsername: normalized.sourceUsername,
+      sourceChatId: normalized.sourceChatId || "",
+      sourceUsername: normalized.sourceUsername || "",
+      sourceUrl: normalized.sourceUrl || "",
       syncMetadata,
       streamMedia,
     };
@@ -544,12 +572,14 @@ function registerChatRoutes(app, deps) {
           sourceRaw: remoteChannelConfig.sourceRaw,
           sourceChatId: remoteChannelConfig.sourceChatId,
           sourceUsername: remoteChannelConfig.sourceUsername,
+          sourceUrl: remoteChannelConfig.sourceUrl || "",
           syncMetadata: remoteChannelConfig.syncMetadata,
           streamMedia: remoteChannelConfig.streamMedia,
           enabled: remoteChannelConfig.enabled,
         });
         if (
           remoteChannelConfig.enabled &&
+          remoteChannelConfig.provider === "telegram" &&
           remoteChannelConfig.syncMetadata &&
           typeof remoteChannelManager?.syncSourceMetadata === "function"
         ) {

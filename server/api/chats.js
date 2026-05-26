@@ -735,6 +735,9 @@ function registerChatRoutes(app, deps) {
       return res.status(404).json({ error: "Channel not found." });
     }
 
+    // Cache for 5 minutes — metadata changes rarely and this endpoint is public.
+    res.setHeader("Cache-Control", "public, max-age=300");
+
     return res.json({
       name: chat.name || "Channel",
       username: chat.group_username || "",

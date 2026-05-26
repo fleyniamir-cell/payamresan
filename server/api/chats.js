@@ -56,6 +56,7 @@ function registerChatRoutes(app, deps) {
     setChatMemberRole,
     FILE_UPLOAD,
     REMOTE_CHANNELS,
+    ACCOUNT_CREATION,
     remoteChannelManager,
     upsertRemoteChannelSource,
   } = deps;
@@ -708,6 +709,37 @@ function registerChatRoutes(app, deps) {
       ok: true,
       id: chatId,
       alreadyMember: wasMember,
+    });
+  });
+
+  // Public unauthenticated metadata endpoint used by remote Songbird servers
+  // to sync channel name and avatar when "Sync Channel Metadata" is enabled.
+  // Only works for public channels on servers with SIGN_UP enabled.
+  app.get("/api/channels/:username/meta", (req, res) => {
+    if (!ACCOUNT_CREATION) {
+      // Private server — refuse to expose channel metadata to remote servers.
+      return res.status(403).json({ error: "This server is private." });
+    }
+
+    const username = String(req.params?.username || "").trim().toLowerCase();
+    if (!username) {
+      return res.status(400).json({ error: "Channel username is required." });
+    }
+
+    const chat = findChatByGroupUsername(username);
+    if (
+      !chat ||
+      String(chat.type || "").toLowerCase() !== "channel" ||
+      !isPublicChat(chat)
+    ) {
+      return res.status(404).json({ error: "Channel not found." });
+    }
+
+    return res.json({
+      name: chat.name || "Channel",
+      username: chat.group_username || "",
+      avatarUrl: normalizeGroupAvatarUrl(chat.group_avatar_url) || null,
+      color: chat.group_color || "#10b981",
     });
   });
 

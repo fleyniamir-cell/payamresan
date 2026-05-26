@@ -643,7 +643,6 @@ export default function NewGroupModal({
                         style={{ unicodeBidi: "plaintext" }}
                       />
                     </div>
-                    {groupForm.remoteChannelProvider !== "songbird" ? (
                     <button
                       type="button"
                       role="switch"
@@ -671,7 +670,6 @@ export default function NewGroupModal({
                         <span className="inline-block h-5 w-5 rounded-full bg-white shadow transition" />
                       </span>
                     </button>
-                    ) : null}
                     <button
                       type="button"
                       role="switch"

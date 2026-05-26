@@ -228,12 +228,10 @@ function registerRemoteChannelRoutes(app, deps) {
 
     if (
       enabled &&
-      provider === "telegram" &&
       syncMetadata &&
       typeof remoteChannelManager?.syncSourceMetadata === "function"
     ) {
-      // Run metadata sync in the background so the response is not blocked by
-      // Telegram network round-trips (getEntity + downloadProfilePhoto).
+      // Run metadata sync in the background — works for both Telegram and Songbird.
       const sourceId = source.id;
       remoteChannelManager.syncSourceMetadata(sourceId).catch(() => {
         // Errors are recorded on the source record by syncSourceMetadata itself.

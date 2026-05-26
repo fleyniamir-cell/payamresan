@@ -1026,6 +1026,12 @@ function createRemoteChannelManager(deps = {}) {
     if (!Number(source.enabled || 0)) {
       throw new Error("Remote Channel source is disabled.");
     }
+
+    // Dispatch to the correct provider implementation.
+    if (source.provider === "songbird") {
+      return syncSongbirdSourceMetadata(source);
+    }
+
     const activeClient = await ensureClient();
     try {
       const resolved = await syncResolvedSourceMetadata(
@@ -1041,6 +1047,118 @@ function createRemoteChannelManager(deps = {}) {
       markTelegramClientForReset(error, "sync-source-metadata");
       throw error;
     }
+  }
+
+  /**
+   * Fetch channel name and avatar from a remote Songbird server's public
+   * metadata endpoint and apply them to the local channel if sync_metadata
+   * is enabled — mirrors what syncResolvedSourceMetadata does for Telegram.
+   */
+  async function syncSongbirdSourceMetadata(source) {
+    const sourceUrl = String(source.source_url || "").trim();
+    const channelUsername = String(source.source_username || "").trim();
+    if (!sourceUrl || !channelUsername) {
+      throw new Error(
+        "Songbird source URL or channel username is not configured.",
+      );
+    }
+
+    const metaUrl = `${sourceUrl}/api/channels/${encodeURIComponent(channelUsername)}/meta`;
+    let data;
+    try {
+      const res = await fetch(metaUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          body?.error || `Target server returned ${res.status}.`,
+        );
+      }
+      data = await res.json();
+    } catch (error) {
+      const message = errorMessage(error);
+      updateRemoteChannelSourceError(source.id, message);
+      throw new Error(`Songbird metadata sync failed: ${message}`);
+    }
+
+    const title = String(data?.name || "").trim();
+    const remoteAvatarUrl = String(data?.avatarUrl || "").trim();
+
+    // Download and cache the avatar locally if file uploads are enabled.
+    let localAvatarUrl = source.source_avatar_url || "";
+    if (fileUploadEnabled && remoteAvatarUrl && fs && path && avatarUploadRootDir) {
+      try {
+        const avatarRes = await fetch(`${sourceUrl}${remoteAvatarUrl}`, {
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (avatarRes.ok) {
+          const buffer = Buffer.from(await avatarRes.arrayBuffer());
+          if (buffer.length > 0) {
+            const safeUsername = channelUsername.replace(/[^a-zA-Z0-9_-]/g, "");
+            const stamp = Date.now();
+            const fileName = `songbird-source-${Number(source.id)}-${safeUsername}-${stamp}.jpg`;
+            const filePath = path.join(avatarUploadRootDir, fileName);
+            fs.mkdirSync(avatarUploadRootDir, { recursive: true });
+            fs.writeFileSync(filePath, buffer);
+            storageEncryption?.encryptFileInPlace?.(filePath);
+            localAvatarUrl = `/api/uploads/avatars/${fileName}`;
+          }
+        }
+      } catch {
+        // Avatar download failure is non-fatal — keep existing avatar.
+      }
+    }
+
+    // Apply to the local channel if sync_metadata is enabled.
+    const targetChat = findChatById(Number(source.chat_id || 0));
+    if (
+      targetChat &&
+      Boolean(Number(source.sync_metadata || 0)) &&
+      typeof updateChannelChat === "function"
+    ) {
+      const nextName = title || targetChat.name;
+      const nextAvatarUrl = localAvatarUrl || null;
+      const metadataChanged =
+        String(nextName || "") !== String(targetChat.name || "") ||
+        String(nextAvatarUrl || "") !== String(targetChat.group_avatar_url || "");
+      if (metadataChanged) {
+        updateChannelChat(Number(targetChat.id), {
+          name: nextName,
+          groupUsername: targetChat.group_username,
+          groupVisibility: targetChat.group_visibility,
+          allowMemberInvites: Boolean(
+            Number(targetChat.allow_member_invites || 0),
+          ),
+          groupAvatarUrl: nextAvatarUrl,
+        });
+        listChatMembers(Number(targetChat.id))
+          .map((member) => String(member?.username || "").toLowerCase())
+          .filter(Boolean)
+          .forEach((memberUsername) => {
+            try {
+              emitSseEvent?.(memberUsername, {
+                type: "chat_list_changed",
+                chatId: Number(targetChat.id),
+              });
+            } catch {
+              // ignore realtime list errors
+            }
+          });
+      }
+    }
+
+    updateRemoteChannelSourceSeen(source.id, {
+      sourceUsername: channelUsername,
+      sourceTitle: title,
+      sourceAvatarUrl: localAvatarUrl,
+      touch: true,
+      clearError: true,
+    });
+
+    return { title, username: channelUsername, avatarUrl: localAvatarUrl };
   }
 
   async function pollSource(activeClient, source) {

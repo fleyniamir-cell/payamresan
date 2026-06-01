@@ -951,13 +951,21 @@ export default function ChatWindowPanel({
     });
   };
 
-  const chatScrollStyle = useMemo(
+  const chatScrollStaticStyle = useMemo(
     () => ({
       backgroundImage: isDark
         ? "radial-gradient(circle at top right, rgba(16,185,129,0.22), transparent 48%), radial-gradient(circle at bottom left, rgba(16,185,129,0.20), transparent 44%)"
         : "radial-gradient(circle at top right, rgba(16,185,129,0.10), transparent 45%), radial-gradient(circle at bottom left, rgba(16,185,129,0.09), transparent 40%)",
       backgroundColor: isDark ? "#0b1320" : "#dcfce7",
       scrollbarGutter: "stable both-edges",
+      overflowAnchor: "none",
+    }),
+    [isDark],
+  );
+
+  const chatScrollStyle = useMemo(
+    () => ({
+      ...chatScrollStaticStyle,
       overscrollBehaviorY:
         !isDesktop && composerFocused ? "none" : "contain",
       paddingTop:
@@ -971,13 +979,12 @@ export default function ChatWindowPanel({
           ? "0.75rem"
           : "0.5rem"
         : undefined,
-      overflowAnchor: "none",
     }),
     [
       activeChatId,
+      chatScrollStaticStyle,
       composerFocused,
       insecureConnection,
-      isDark,
       isDesktop,
       showComposer,
       showChannelMuteFooter,

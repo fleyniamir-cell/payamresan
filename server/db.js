@@ -1960,28 +1960,9 @@ export function getMessages(chatId, options = {}) {
     ? rowsRaw.slice(0, limit)
     : rowsRaw.slice(0, limit).reverse();
 
-  const totalRow = getRow(
-    hasViewerUserId
-      ? `SELECT COUNT(*) AS total
-         FROM chat_messages
-         WHERE chat_id = ?
-           AND ${getVisibleMessageFilterSql(
-             "chat_messages",
-             "WHERE hidden_chat_messages.user_id = ?",
-           )}`
-      : `SELECT COUNT(*) AS total
-         FROM chat_messages
-         WHERE chat_id = ?
-           AND chat_messages.hidden_everyone_at IS NULL`,
-    hasViewerUserId ? [chatId, viewerUserIdRaw] : [chatId],
-  );
-
-  const totalCount = Number(totalRow?.total || 0);
-
   return {
     messages: rows.map(decryptMessageRow),
     hasMore,
-    totalCount,
   };
 }
 

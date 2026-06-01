@@ -218,7 +218,7 @@ function registerMessageRoutes(app, deps) {
       return res.status(403).json({ error: "Not a member of this chat." });
     }
 
-    let { messages, hasMore, totalCount } = getMessages(chatId, {
+    let { messages, hasMore } = getMessages(chatId, {
       beforeId: beforeId > 0 ? beforeId : null,
       beforeCreatedAt: beforeCreatedAt || null,
       afterId: afterId > 0 ? afterId : null,
@@ -227,32 +227,27 @@ function registerMessageRoutes(app, deps) {
       viewerUserId: user.id,
     });
 
-    const cleanup = cleanupMissingMessageFiles(
-      messages.map((message) => Number(message.id)).filter(Boolean),
-    );
-
-    if (cleanup.changed) {
-      if (cleanup.deletedByChat && cleanup.deletedByChat.size) {
-        cleanup.deletedByChat.forEach((messageIds, chatId) => {
-          emitChatEvent(Number(chatId), {
-            type: "chat_message_deleted",
-            chatId: Number(chatId),
-            messageIds,
+    // Run the missing-file cleanup in the background so it doesn't block the
+    // response. If files are found missing the next fetch will reflect the
+    // deletion via the SSE chat_message_deleted event emitted by the cleanup.
+    setImmediate(() => {
+      try {
+        const cleanup = cleanupMissingMessageFiles(
+          messages.map((message) => Number(message.id)).filter(Boolean),
+        );
+        if (cleanup.changed && cleanup.deletedByChat?.size) {
+          cleanup.deletedByChat.forEach((messageIds, deletedChatId) => {
+            emitChatEvent(Number(deletedChatId), {
+              type: "chat_message_deleted",
+              chatId: Number(deletedChatId),
+              messageIds,
+            });
           });
-        });
+        }
+      } catch (_) {
+        // best-effort background cleanup — never crash the server
       }
-      const refreshed = getMessages(chatId, {
-        beforeId: beforeId > 0 ? beforeId : null,
-        beforeCreatedAt: beforeCreatedAt || null,
-        afterId: afterId > 0 ? afterId : null,
-        afterCreatedAt: afterCreatedAt || null,
-        limit,
-        viewerUserId: user.id,
-      });
-      messages = refreshed.messages;
-      hasMore = refreshed.hasMore;
-      totalCount = refreshed.totalCount;
-    }
+    });
 
     const normalizedMessages = messages.map((message) => ({
       ...message,
@@ -406,7 +401,7 @@ function registerMessageRoutes(app, deps) {
       hasMore,
     });
 
-    res.json({ chatId, messages: enriched, hasMore, totalCount });
+    res.json({ chatId, messages: enriched, hasMore });
   });
 
   app.get("/api/messages/first-unread", (req, res) => {

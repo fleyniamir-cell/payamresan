@@ -967,7 +967,15 @@ if (MESSAGE_TEXT_RETENTION_DAYS > 0) {
   }
 }
 
-backfillStorageEncryption();
+// Defer the storage encryption backfill so it doesn't block the event loop
+// before the server starts accepting requests.
+setImmediate(() => {
+  try {
+    backfillStorageEncryption();
+  } catch (err) {
+    console.error("[storage-encryption] deferred backfill failed:", String(err?.message || err));
+  }
+});
 remoteChannelManager.start();
 
 app.listen(port, () => {

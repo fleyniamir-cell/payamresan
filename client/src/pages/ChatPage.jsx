@@ -6252,7 +6252,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setUserScrolledUp,
     userScrolledUpRef,
   ]);
-  const usernamePattern = /^[a-z0-9._]+$/;
+  const usernamePattern = /^(?=.*[a-z0-9])[a-z0-9._]+$/;
   const shouldPromptNotifications =
     notificationsSupported &&
     notificationPermission === "default" &&

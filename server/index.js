@@ -218,7 +218,7 @@ const staticLimiter = rateLimit({
 });
 
 const MB = 1024 * 1024;
-const USERNAME_REGEX = /^[a-z0-9._]+$/;
+const USERNAME_REGEX = /^(?=.*[a-z0-9])[a-z0-9._]+$/;
 const readEnvSizeMbAsBytes = (mbKeys, legacyByteKeys, fallbackMb, options = {}) => {
   const mbValue = readEnvInt(mbKeys, null, options);
   if (mbValue !== null) return mbValue * MB;

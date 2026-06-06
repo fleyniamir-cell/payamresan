@@ -260,7 +260,7 @@ export function MobileSettingsPanel({
                     }))
                   }
                   maxLength={USERNAME_MAX}
-                  pattern="[a-zA-Z0-9._]+"
+                  pattern="(?=.*[a-zA-Z0-9])[a-zA-Z0-9._]+"
                   title="Use english letters, numbers, dot (.), and underscore (_)."
                   autoCapitalize="none"
                   lang={usernameHasPersian ? "fa" : "en"}

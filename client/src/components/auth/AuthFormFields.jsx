@@ -76,7 +76,7 @@ export default function AuthFormFields({
             name="username"
             type="text"
             required
-            pattern="[a-zA-Z0-9._]+"
+            pattern="(?=.*[a-zA-Z0-9])[a-zA-Z0-9._]+"
             title="Use english letters, numbers, dot (.), and underscore (_)."
             autoCapitalize="none"
             placeholder="songbird.sage"

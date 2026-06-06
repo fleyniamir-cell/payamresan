@@ -23,6 +23,7 @@ import { storageEncryption } from "./lib/storageEncryption.js";
 import { createRemoteChannelManager } from "./lib/remoteChannels.js";
 import { buildTimestampSchedule } from "./lib/timeUtils.js";
 import { isLoopbackRequest, parseUploadFileMetadata } from "./lib/requestUtils.js";
+import { USERNAME_REGEX } from "./lib/validation.js";
 import { USER_COLORS, setUserColor } from "./settings/colors.js";
 import { readEnvBool, readEnvInt } from "./settings/env.js";
 import {
@@ -218,7 +219,6 @@ const staticLimiter = rateLimit({
 });
 
 const MB = 1024 * 1024;
-const USERNAME_REGEX = /^(?=.*[a-z0-9])[a-z0-9._]+$/;
 const readEnvSizeMbAsBytes = (mbKeys, legacyByteKeys, fallbackMb, options = {}) => {
   const mbValue = readEnvInt(mbKeys, null, options);
   if (mbValue !== null) return mbValue * MB;

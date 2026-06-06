@@ -8,7 +8,7 @@ import {
 } from "../../../icons/lucide.js";
 import { hasPersian } from "../../../utils/fontUtils.js";
 import { getAvatarInitials } from "../../../utils/avatarInitials.js";
-import { NICKNAME_MAX, USERNAME_MAX } from "../../../utils/nameLimits.js";
+import { NICKNAME_MAX, USERNAME_MAX, USERNAME_INPUT_PATTERN } from "../../../utils/nameLimits.js";
 import { InlineError } from "../common/InlineError.jsx";
 import { SettingsMenuActions } from "../menus/SettingsMenuActions.jsx";
 import { AboutSettingsPanel } from "./AboutSettingsPanel.jsx";
@@ -260,7 +260,7 @@ export function MobileSettingsPanel({
                     }))
                   }
                   maxLength={USERNAME_MAX}
-                  pattern="(?=.*[a-zA-Z0-9])[a-zA-Z0-9._]+"
+                  pattern={USERNAME_INPUT_PATTERN}
                   title="Use english letters, numbers, dot (.), and underscore (_)."
                   autoCapitalize="none"
                   lang={usernameHasPersian ? "fa" : "en"}

@@ -7,7 +7,7 @@ import { useAppContextMenu } from "../components/context-menu/useAppContextMenu.
 import { CHAT_PAGE_CONFIG } from "../settings/chatPageConfig.js";
 import { getAvatarInitials } from "../utils/avatarInitials.js";
 import { getRandomAvatarColor } from "../utils/avatarColor.js";
-import { NICKNAME_MAX, USERNAME_MAX } from "../utils/nameLimits.js";
+import { NICKNAME_MAX, USERNAME_MAX, USERNAME_REGEX } from "../utils/nameLimits.js";
 import { resolveReplyPreview, summarizeFiles, truncateText } from "../utils/messagePreview.js";
 import {
   formatBytesAsMb,
@@ -5258,7 +5258,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       setProfileError("Username must be at least 3 characters.");
       return;
     }
-    if (!usernamePattern.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setProfileError(
         "Username can only include english letters, numbers, dot (.), and underscore (_).",
       );
@@ -5799,7 +5799,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       setNewGroupError(`${label} username must be at least 3 characters.`);
       return;
     }
-    if (!usernamePattern.test(username)) {
+    if (!USERNAME_REGEX.test(username)) {
       setNewGroupError(
         `${label} username can only include english letters, numbers, dot (.), and underscore (_).`,
       );
@@ -6252,7 +6252,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setUserScrolledUp,
     userScrolledUpRef,
   ]);
-  const usernamePattern = /^(?=.*[a-z0-9])[a-z0-9._]+$/;
   const shouldPromptNotifications =
     notificationsSupported &&
     notificationPermission === "default" &&

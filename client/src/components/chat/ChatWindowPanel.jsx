@@ -20,6 +20,7 @@ import {
 import { getAvatarStyle } from "../../utils/avatarColor.js";
 import { hasPersian } from "../../utils/fontUtils.js";
 import { getAvatarInitials } from "../../utils/avatarInitials.js";
+import { formatCompactCount } from "../../utils/chatFormat.js";
 import Avatar from "../common/Avatar.jsx";
 import {
   FocusedMediaModal,
@@ -1767,7 +1768,7 @@ export default function ChatWindowPanel({
           </span>
           {unreadInChat > 0 ? (
             <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-500 px-2 text-[10px] font-bold text-white">
-              {unreadInChat > 999 ? "+999" : unreadInChat}
+              {unreadInChat > 999 ? formatCompactCount(unreadInChat) : unreadInChat}
             </span>
           ) : null}
         </button>

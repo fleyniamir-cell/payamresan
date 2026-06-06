@@ -12,6 +12,7 @@ import { resolveReplyPreview, summarizeFiles, truncateText } from "../utils/mess
 import {
   formatBytesAsMb,
   formatChatCardTimestamp,
+  formatCompactCount,
   formatDayLabel,
   formatTime,
   parseServerDate,
@@ -1530,11 +1531,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         sum + (chat?._muted ? 0 : Number(chat?.unread_count || 0)),
       0,
     );
-    const totalUnread = totalUnreadCount > 999 ? "+999" : totalUnreadCount;
+    const totalUnread = totalUnreadCount > 0 ? formatCompactCount(totalUnreadCount) : 0;
 
     document.title =
       totalUnreadCount > 0
-        ? `Songbird | ${totalUnread} new message${totalUnread === 1 ? "" : "s"}`
+        ? `Songbird | ${totalUnread} new message${totalUnreadCount === 1 ? "" : "s"}`
         : "Songbird";
     if (navigator?.setAppBadge) {
       if (totalUnreadCount > 0) {

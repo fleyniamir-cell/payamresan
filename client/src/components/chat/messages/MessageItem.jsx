@@ -33,6 +33,7 @@ function SongbirdIcon({ size = 13 }) {
 }
 import { hasPersian } from "../../../utils/fontUtils.js";
 import { getAvatarInitials } from "../../../utils/avatarInitials.js";
+import { formatCompactCount } from "../../../utils/chatFormat.js";
 import ContextMenuSurface from "../../context-menu/ContextMenuSurface.jsx";
 import { MessageFiles } from "../media/MessageFiles.jsx";
 import {
@@ -562,18 +563,7 @@ export const MessageItem = memo(function MessageItem({
 
   const formatSeenCount = (value) => {
     const count = Math.max(1, Number(value || 0));
-    if (!Number.isFinite(count)) return "1";
-    if (count < 1000) return String(count);
-    if (count < 1_000_000) {
-      const next = (count / 1000).toFixed(1);
-      return `${next.replace(/\.0$/, "")}K`;
-    }
-    if (count < 1_000_000_000) {
-      const next = (count / 1_000_000).toFixed(1);
-      return `${next.replace(/\.0$/, "")}M`;
-    }
-    const next = (count / 1_000_000_000).toFixed(1);
-    return `${next.replace(/\.0$/, "")}B`;
+    return formatCompactCount(count);
   };
   const formatExpiryBadge = () => {
     const files = Array.isArray(msg?.files) ? msg.files : [];

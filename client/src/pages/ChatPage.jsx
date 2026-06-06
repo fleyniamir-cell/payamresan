@@ -522,7 +522,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const {
     notificationsModalOpen,
     setNotificationsModalOpen,
-    testNotificationSent,
     notificationsEnabled,
     notificationPermission,
     notificationsSupported,
@@ -530,8 +529,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     notificationsDisabled,
     notificationStatusLabel,
     notificationsDebugLine,
+    messagePreviewEnabled,
     handleToggleNotifications,
-    handleTestPush,
+    handleToggleMessagePreview,
   } = useChatNotifications({
     user,
     settingsPanel,
@@ -6392,8 +6392,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         notificationStatusLabel={notificationStatusLabel}
         onToggleNotifications={handleToggleNotifications}
         onOpenNotifications={() => setNotificationsModalOpen(true)}
-        onTestPush={handleTestPush}
-        testNotificationSent={testNotificationSent}
+        messagePreviewEnabled={messagePreviewEnabled}
+        onToggleMessagePreview={handleToggleMessagePreview}
         notificationsDebugLine={notificationsDebugLine}
         onOpenSavedMessages={openSavedMessages}
         onClearCache={handleClearCache}
@@ -6743,9 +6743,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             notificationsDisabled={notificationsDisabled}
             notificationStatusLabel={notificationStatusLabel}
             onToggleNotifications={handleToggleNotifications}
-            onTestPush={handleTestPush}
-            testNotificationSent={testNotificationSent}
-            notificationsEnabled={notificationsEnabled}
+            messagePreviewEnabled={messagePreviewEnabled}
+            onToggleMessagePreview={handleToggleMessagePreview}
             debugLine={notificationsDebugLine}
           />
         </Suspense>

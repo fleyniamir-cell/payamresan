@@ -1,10 +1,12 @@
-import { Bell, BellOff } from "../../../icons/lucide.js";
+import { Bell, BellOff, MessageCircleMore, MessageCircleX } from "../../../icons/lucide.js";
 
 export function NotificationsSettingsPanel({
   notificationsActive,
   notificationsDisabled,
   notificationStatusLabel,
   onToggleNotifications,
+  messagePreviewEnabled,
+  onToggleMessagePreview,
   debugLine = "",
 }) {
   const buttonBase =
@@ -18,6 +20,8 @@ export function NotificationsSettingsPanel({
   const showDebug =
     typeof window !== "undefined" &&
     window.localStorage?.getItem("sb-debug-push") === "1";
+
+  const previewDisabled = notificationsDisabled || !notificationsActive;
 
   return (
     <>
@@ -60,6 +64,34 @@ export function NotificationsSettingsPanel({
         </p>
       ) : null}
 
+      <button
+        type="button"
+        onClick={onToggleMessagePreview}
+        disabled={previewDisabled}
+        role="switch"
+        aria-checked={messagePreviewEnabled}
+        className={`mt-3 ${buttonBase} ${buttonTheme} ${buttonHover} ${
+          previewDisabled ? disabledTheme : ""
+        }`}
+      >
+        <span className="flex items-center gap-3">
+          {messagePreviewEnabled ? (
+            <MessageCircleMore size={18} className="icon-anim-sway" />
+          ) : (
+            <MessageCircleX size={18} className="icon-anim-sway" />
+          )}
+          Message preview
+        </span>
+        <span
+          className={`relative inline-flex h-6 w-11 items-center rounded-full p-0.5 transition ${
+            messagePreviewEnabled
+              ? "bg-emerald-500 justify-end"
+              : "bg-slate-300 dark:bg-slate-700 justify-start"
+          }`}
+        >
+          <span className="inline-block h-5 w-5 rounded-full bg-white shadow transition" />
+        </span>
+      </button>
     </>
   );
 }

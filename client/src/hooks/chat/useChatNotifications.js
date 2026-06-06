@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NOTIFICATIONS_ENABLED_KEY } from "../../utils/chatPageConstants.js";
+import { NOTIFICATIONS_ENABLED_KEY, NOTIFICATION_MESSAGE_PREVIEW_KEY } from "../../utils/chatPageConstants.js";
 
 const PUSH_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const PUSH_RESUBSCRIBE_DEBOUNCE_MS = 2 * 60 * 1000;
@@ -49,6 +49,11 @@ export function useChatNotifications({
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
     const stored = window.localStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
+    return stored === "0" ? false : true;
+  });
+  const [messagePreviewEnabled, setMessagePreviewEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem(NOTIFICATION_MESSAGE_PREVIEW_KEY);
     return stored === "0" ? false : true;
   });
   const [notificationPermission, setNotificationPermission] = useState(() => {
@@ -105,6 +110,13 @@ export function useChatNotifications({
     setNotificationsEnabled(value);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(NOTIFICATIONS_ENABLED_KEY, value ? "1" : "0");
+    }
+  }, []);
+
+  const persistMessagePreviewEnabled = useCallback((value) => {
+    setMessagePreviewEnabled(value);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(NOTIFICATION_MESSAGE_PREVIEW_KEY, value ? "1" : "0");
     }
   }, []);
 
@@ -225,6 +237,7 @@ export function useChatNotifications({
       const res = await subscribePush({
         username: user?.username,
         subscription: json,
+        messagePreview: messagePreviewEnabled,
       });
       if (!res.ok) {
         setPushSubscribeStatus("err");
@@ -242,6 +255,7 @@ export function useChatNotifications({
   }, [
     fetchPushPublicKey,
     getCurrentPermission,
+    messagePreviewEnabled,
     notificationPermission,
     notificationsSupported,
     subscribePush,
@@ -319,6 +333,20 @@ export function useChatNotifications({
     persistNotificationsEnabled,
     removePushSubscription,
     requestNotificationPermission,
+  ]);
+
+  const handleToggleMessagePreview = useCallback(async () => {
+    const next = !messagePreviewEnabled;
+    persistMessagePreviewEnabled(next);
+    // Re-subscribe to push with the updated preference if currently active
+    if (notificationsActive) {
+      await ensurePushSubscription();
+    }
+  }, [
+    ensurePushSubscription,
+    messagePreviewEnabled,
+    notificationsActive,
+    persistMessagePreviewEnabled,
   ]);
 
   const handleTestPush = useCallback(async () => {
@@ -484,7 +512,9 @@ export function useChatNotifications({
     notificationsDisabled,
     notificationStatusLabel,
     notificationsDebugLine,
+    messagePreviewEnabled,
     handleToggleNotifications,
+    handleToggleMessagePreview,
     handleTestPush,
   };
 }

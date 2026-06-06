@@ -8,6 +8,8 @@ export function NotificationsSettingsModal({
   notificationsDisabled,
   notificationStatusLabel,
   onToggleNotifications,
+  messagePreviewEnabled,
+  onToggleMessagePreview,
   debugLine = "",
 }) {
   if (!open) return null;
@@ -35,6 +37,8 @@ export function NotificationsSettingsModal({
             notificationsDisabled={notificationsDisabled}
             notificationStatusLabel={notificationStatusLabel}
             onToggleNotifications={onToggleNotifications}
+            messagePreviewEnabled={messagePreviewEnabled}
+            onToggleMessagePreview={onToggleMessagePreview}
             debugLine={debugLine}
           />
         </div>

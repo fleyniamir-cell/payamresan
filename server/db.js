@@ -2270,19 +2270,21 @@ export function setChatMuted(userId, chatId, muted) {
   ]);
 }
 
-export function upsertPushSubscription(userId, endpoint, p256dh, auth) {
+export function upsertPushSubscription(userId, endpoint, p256dh, auth, messagePreview = 1) {
   const uid = Number(userId || 0);
   const safeEndpoint = String(endpoint || "").trim();
   if (!uid || !safeEndpoint) return;
+  const preview = messagePreview === false || messagePreview === 0 ? 0 : 1;
   run(
-    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, message_preview, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(endpoint) DO UPDATE SET
        user_id = excluded.user_id,
        p256dh = excluded.p256dh,
        auth = excluded.auth,
+       message_preview = excluded.message_preview,
        updated_at = datetime('now')`,
-    [uid, safeEndpoint, String(p256dh || ""), String(auth || "")],
+    [uid, safeEndpoint, String(p256dh || ""), String(auth || ""), preview],
   );
 }
 
@@ -2333,7 +2335,7 @@ export function listPushSubscriptionsByUserIds(userIds = []) {
   if (!ids.length) return [];
   const placeholders = ids.map(() => "?").join(", ");
   return getAll(
-    `SELECT user_id, endpoint, p256dh, auth
+    `SELECT user_id, endpoint, p256dh, auth, message_preview
      FROM push_subscriptions
      WHERE user_id IN (${placeholders})`,
     ids,

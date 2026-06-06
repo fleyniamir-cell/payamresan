@@ -49,8 +49,8 @@ export function MobileSettingsPanel({
   notificationStatusLabel,
   onToggleNotifications,
   _onOpenNotifications,
-  onTestPush,
-  testNotificationSent,
+  messagePreviewEnabled,
+  onToggleMessagePreview,
   notificationsDebugLine,
   onClearCache,
   dataCacheStats,
@@ -502,9 +502,8 @@ export function MobileSettingsPanel({
             notificationsDisabled={notificationsDisabled}
             notificationStatusLabel={notificationStatusLabel}
             onToggleNotifications={onToggleNotifications}
-            onTestPush={onTestPush}
-            testNotificationSent={testNotificationSent}
-            notificationsEnabled={notificationsEnabled}
+            messagePreviewEnabled={messagePreviewEnabled}
+            onToggleMessagePreview={onToggleMessagePreview}
             debugLine={notificationsDebugLine}
           />
           <div className="mt-5 flex items-center justify-end">

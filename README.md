@@ -903,12 +903,6 @@ If you like this project which I hope you do, consider supporting your favorite 
 TPf1bEhipKpGkjo5N2Scj9nufNNh5TNrwX
 ```
 
-### USDT (TRC20):
-
-```
-0x63313383611BbE11f4fEc139c14ad0b70281b822
-```
-
 ### BTC:
 
 ```

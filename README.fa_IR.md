@@ -906,12 +906,6 @@ docker compose exec songbird npm --prefix /app/server run db:inspect
 TPf1bEhipKpGkjo5N2Scj9nufNNh5TNrwX
 ```
 
-### USDT (TRC20):
-
-```
-0x63313383611BbE11f4fEc139c14ad0b70281b822
-```
-
 ### BTC:
 
 ```

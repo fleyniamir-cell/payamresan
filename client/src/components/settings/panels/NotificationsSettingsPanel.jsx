@@ -5,9 +5,6 @@ export function NotificationsSettingsPanel({
   notificationsDisabled,
   notificationStatusLabel,
   onToggleNotifications,
-  onTestPush,
-  testNotificationSent,
-  notificationsEnabled,
   debugLine = "",
 }) {
   const buttonBase =
@@ -18,10 +15,6 @@ export function NotificationsSettingsPanel({
     "border-emerald-200/70 bg-white/90 text-emerald-700 dark:border-emerald-500/30 dark:bg-slate-900/50 dark:text-emerald-200";
   const disabledTheme =
     "cursor-not-allowed opacity-60 hover:bg-transparent hover:shadow-none";
-  const sentBadgeTheme =
-    "inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow-[0_0_14px_rgba(16,185,129,0.2)] dark:border-emerald-500/30 dark:bg-slate-900 dark:text-emerald-200 dark:hover:bg-emerald-500/10";
-  const testButtonBase =
-    "inline-flex h-7 min-w-[56px] items-center justify-center rounded-full px-3 py-1 text-xs font-semibold leading-none transition";
   const showDebug =
     typeof window !== "undefined" &&
     window.localStorage?.getItem("sb-debug-push") === "1";
@@ -44,7 +37,7 @@ export function NotificationsSettingsPanel({
           ) : (
             <BellOff size={18} className="icon-anim-sway" />
           )}
-          Enable notifications
+          Show notifications
         </span>
         <span
           className={`relative inline-flex h-6 w-11 items-center rounded-full p-0.5 transition ${
@@ -67,33 +60,6 @@ export function NotificationsSettingsPanel({
         </p>
       ) : null}
 
-      <div
-        className={`mt-4 ${buttonBase} ${buttonTheme} ${
-          notificationsDisabled || !notificationsEnabled
-            ? disabledTheme
-            : buttonHover
-        }`}
-      >
-        <span>Test notification</span>
-        <button
-          type="button"
-          onClick={onTestPush}
-          disabled={
-            notificationsDisabled ||
-            !notificationsEnabled ||
-            testNotificationSent
-          }
-          className={
-            notificationsDisabled || !notificationsEnabled
-              ? `${testButtonBase} cursor-not-allowed bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500`
-              : testNotificationSent
-                ? `${testButtonBase} ${sentBadgeTheme} cursor-not-allowed`
-                : `${testButtonBase} bg-emerald-500 text-white hover:bg-emerald-400`
-          }
-        >
-          {testNotificationSent ? "Sent" : "Test"}
-        </button>
-      </div>
     </>
   );
 }

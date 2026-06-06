@@ -398,7 +398,7 @@ const {
   registerUploadRoutes,
 } = uploadTools;
 
-const { addSseClient, removeSseClient, emitSseEvent, emitChatEvent, getCachedMembers } = createSseHub({
+const { addSseClient, removeSseClient, emitSseEvent, emitChatEvent, getCachedMembers, isUserConnected } = createSseHub({
   listChatMembers,
 });
 
@@ -601,6 +601,7 @@ const apiDeps = {
   deleteUserById,
   emitChatEvent,
   emitSseEvent,
+  isUserConnected,
   enqueueRemoteChannelQueueItem,
   enqueueVideoTranscodeJob,
   ensureAvatarExists,
@@ -740,6 +741,7 @@ const remoteChannelManager = createRemoteChannelManager({
   sanitizeDurationSeconds,
   sanitizePositiveInt,
   sendPushNotificationToUsers,
+  isUserConnected,
   setMessageExpiresAt,
   setMessageForwardOrigin,
   setRemoteChannelProviderState,

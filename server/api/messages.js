@@ -46,6 +46,7 @@ function registerMessageRoutes(app, deps) {
     listChatMembers,
     listMutedUserIdsForChat,
     sendPushNotificationToUsers,
+    isUserConnected,
     listMessageFilesByMessageIds,
     parseUploadFileMetadata,
     path,
@@ -1029,6 +1030,7 @@ function registerMessageRoutes(app, deps) {
               );
               const recipientIds = members
                 .filter((member) => Number(member.id) !== Number(user.id))
+                .filter((member) => !isUserConnected(member.username))
                 .map((member) => Number(member.id))
                 .filter(
                   (memberId) =>
@@ -1185,6 +1187,7 @@ function registerMessageRoutes(app, deps) {
         );
         const recipientIds = members
           .filter((member) => Number(member.id) !== Number(user.id))
+          .filter((member) => !isUserConnected(member.username))
           .map((member) => Number(member.id))
           .filter(
             (memberId) =>

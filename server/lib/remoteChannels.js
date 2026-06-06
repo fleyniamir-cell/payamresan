@@ -668,6 +668,7 @@ function createRemoteChannelManager(deps = {}) {
     sanitizeDurationSeconds,
     sanitizePositiveInt,
     sendPushNotificationToUsers,
+    isUserConnected,
     setMessageExpiresAt,
     setMessageForwardOrigin,
     setRemoteChannelProviderState,
@@ -1369,7 +1370,11 @@ function createRemoteChannelManager(deps = {}) {
             memberId > 0 &&
             Number(memberId) !== Number(authorId) &&
             !mutedIds.has(memberId),
-        );
+        )
+        .filter((memberId) => {
+          const member = members.find((m) => Number(m?.id || 0) === memberId);
+          return !isUserConnected(member?.username);
+        });
       if (!recipientIds.length) return;
       await sendPushNotificationToUsers(recipientIds, {
         title: chat.name || "Channel",

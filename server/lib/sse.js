@@ -67,5 +67,11 @@ export function createSseHub({ listChatMembers }) {
     emitSseEvent,
     emitChatEvent,
     getCachedMembers,
+    isUserConnected(username) {
+      const key = String(username || "").toLowerCase();
+      if (!key) return false;
+      const clients = sseClientsByUsername.get(key);
+      return Boolean(clients?.size);
+    },
   };
 }

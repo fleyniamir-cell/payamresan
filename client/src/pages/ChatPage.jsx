@@ -5673,7 +5673,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           setNewGroupForm((prev) => ({
             ...prev,
             remoteChannelEnabled: Boolean(source?.enabled),
-            remoteChannelProvider: source?.provider || "telegram",
+            remoteChannelProvider: source?.provider || "songbird",
             remoteChannelSource:
               source?.sourceRaw ||
               (source?.sourceUsername ? `@${source.sourceUsername}` : "") ||
@@ -5812,7 +5812,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       newGroupForm.visibility !== "private" &&
       Boolean(newGroupForm.remoteChannelEnabled);
     const remoteChannelProvider = String(
-      newGroupForm.remoteChannelProvider || "telegram",
+      newGroupForm.remoteChannelProvider || "songbird",
     ).toLowerCase();
     const remoteChannelSyncMetadata =
       remoteChannelEnabled && Boolean(newGroupForm.remoteChannelSyncMetadata);

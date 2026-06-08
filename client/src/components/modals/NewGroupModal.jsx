@@ -73,7 +73,6 @@ export default function NewGroupModal({
   showRemoteChannelSettings = false,
   remoteChannelAvailable = true,
   remoteChannelTelegramAvailable = true,
-  remoteChannelSongbirdAvailable = true,
   remoteChannelMediaStreamAllowed = false,
   entityLabel = "Group",
   onDeleteChat,
@@ -531,7 +530,6 @@ export default function NewGroupModal({
                       <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         Source
                       </label>
-                      {remoteChannelTelegramAvailable && remoteChannelSongbirdAvailable ? (
                       <button
                         ref={remoteSourceButtonRef}
                         type="button"
@@ -542,8 +540,9 @@ export default function NewGroupModal({
                           }
                           setRemoteSourceMenuOpen((current) => !current);
                         }}
-                        className="mt-2 flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-white px-4 py-3 pr-12 text-left text-sm font-semibold text-slate-700 outline-none transition hover:border-emerald-300 hover:bg-emerald-50 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-300/60 dark:border-emerald-500/30 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-emerald-500/10"
+                        className="relative mt-2 flex w-full items-center rounded-2xl border border-emerald-200 bg-white px-4 py-3 pr-12 text-left text-sm font-semibold text-slate-700 outline-none transition hover:border-emerald-300 hover:bg-emerald-50 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-300/60 dark:border-emerald-500/30 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-emerald-500/10"
                         aria-expanded={remoteSourceMenuOpen}
+                        aria-haspopup="listbox"
                       >
                         <span className="flex items-center gap-2">
                           {groupForm.remoteChannelProvider === "songbird"
@@ -553,69 +552,64 @@ export default function NewGroupModal({
                         </span>
                         <ChevronDown
                           size={16}
-                          className={`absolute right-4 top-[2.95rem] text-emerald-500 transition-transform ${
+                          className={`absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 transition-transform ${
                             remoteSourceMenuOpen ? "rotate-180" : ""
                           }`}
                         />
                       </button>
-                      ) : (
-                      <div className="mt-2 flex w-full items-center gap-2 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 dark:border-emerald-500/30 dark:bg-slate-900 dark:text-slate-100">
-                        {groupForm.remoteChannelProvider === "songbird"
-                          ? <SongbirdIcon size={16} />
-                          : <FaTelegram size={16} className="shrink-0" />}
-                        {remoteProviderLabel}
-                      </div>
-                      )}
                       {remoteSourceMenuOpen ? (
                         <div
                           ref={remoteSourceMenuRef}
                           className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-2xl border border-emerald-200 bg-white p-1 text-sm font-semibold text-slate-700 shadow-xl shadow-emerald-950/10 dark:border-emerald-500/30 dark:bg-slate-900 dark:text-slate-100"
                         >
-                          {remoteChannelTelegramAvailable ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRemoteSourceMenuOpen(false);
-                                setGroupForm((prev) => ({
-                                  ...prev,
-                                  remoteChannelProvider: "telegram",
-                                  remoteChannelSource: "",
-                                }));
-                              }}
-                              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
-                            >
-                              <span className="flex items-center gap-2">
-                                <FaTelegram size={16} className="shrink-0" />
-                                Telegram
-                              </span>
-                              {groupForm.remoteChannelProvider === "telegram" ||
-                              !groupForm.remoteChannelProvider ? (
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                              ) : null}
-                            </button>
-                          ) : null}
-                          {remoteChannelSongbirdAvailable ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRemoteSourceMenuOpen(false);
-                                setGroupForm((prev) => ({
-                                  ...prev,
-                                  remoteChannelProvider: "songbird",
-                                  remoteChannelSource: "",
-                                }));
-                              }}
-                              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
-                            >
-                              <span className="flex items-center gap-2">
-                                <SongbirdIcon size={16} />
-                                Songbird
-                              </span>
-                              {groupForm.remoteChannelProvider === "songbird" ? (
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                              ) : null}
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            disabled={!remoteChannelTelegramAvailable}
+                            onClick={() => {
+                              if (!remoteChannelTelegramAvailable) return;
+                              setRemoteSourceMenuOpen(false);
+                              setGroupForm((prev) => ({
+                                ...prev,
+                                remoteChannelProvider: "telegram",
+                                remoteChannelSource: "",
+                              }));
+                            }}
+                            title={!remoteChannelTelegramAvailable ? "Telegram is not configured on this server" : undefined}
+                            className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition ${
+                              remoteChannelTelegramAvailable
+                                ? "hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
+                                : "cursor-not-allowed opacity-40"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <FaTelegram size={16} className="shrink-0" />
+                              Telegram
+                            </span>
+                            {(groupForm.remoteChannelProvider === "telegram" ||
+                              !groupForm.remoteChannelProvider) && remoteChannelTelegramAvailable ? (
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemoteSourceMenuOpen(false);
+                              setGroupForm((prev) => ({
+                                ...prev,
+                                remoteChannelProvider: "songbird",
+                                remoteChannelSource: "",
+                              }));
+                            }}
+                            className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
+                          >
+                            <span className="flex items-center gap-2">
+                              <SongbirdIcon size={16} />
+                              Songbird
+                            </span>
+                            {groupForm.remoteChannelProvider === "songbird" ? (
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            ) : null}
+                          </button>
                         </div>
                       ) : null}
                     </div>

@@ -112,8 +112,10 @@ function normalizeSongbirdSource(value) {
   const inviteTarget = parts[1];
   const sourceUrl = url.origin; // base URL of the target server
 
-  // If the invite target looks like a username (alphanumeric + dots + underscores),
-  // treat it as the channel username. Otherwise it's an invite token.
+  // We can't reliably distinguish a username from a token at parse time —
+  // the actual channel username is resolved by calling the target server.
+  // Store the inviteTarget as a hint; resolveSongbirdSource() will fill in
+  // sourceUsername after a network call.
   const looksLikeUsername = /^[a-z0-9._]{3,}$/i.test(inviteTarget);
   const sourceUsername = looksLikeUsername ? inviteTarget.toLowerCase() : "";
 
@@ -125,6 +127,88 @@ function normalizeSongbirdSource(value) {
     inviteTarget,
     displayName: sourceUsername ? `@${sourceUsername}` : inviteTarget,
   };
+}
+
+/**
+ * Resolve a Songbird invite link against the target server to get the
+ * real channel username. Verifies the server is public and the channel exists.
+ *
+ * Public channel invite links use the channel username as the path segment
+ * (see buildGroupInviteLink), so the inviteTarget IS the username. We validate
+ * it against the public /api/channels/:username/meta endpoint, which only
+ * exists on public servers and only returns public channels.
+ *
+ * Returns { ok, sourceUsername, channelName, avatarUrl, color, error }
+ */
+async function resolveSongbirdSource(sourceUrl, inviteTarget) {
+  const candidateUsername = String(inviteTarget || "").trim().toLowerCase().replace(/^@+/, "");
+  if (!candidateUsername) {
+    return { ok: false, error: "Songbird source channel username could not be determined from the invite link." };
+  }
+
+  const metaUrl = `${sourceUrl}/api/channels/${encodeURIComponent(candidateUsername)}/meta`;
+  let metaRes;
+  try {
+    metaRes = await fetch(metaUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    return { ok: false, error: `Cannot reach target server: ${String(error?.message || error)}` };
+  }
+
+  if (metaRes.status === 403) {
+    return { ok: false, error: "The target server is private (sign-up disabled). Only public servers can be used as a Songbird remote source." };
+  }
+  if (metaRes.status === 404) {
+    return { ok: false, error: "Channel not found on target server. Use a public channel invite link (e.g. https://server/invite/channelusername)." };
+  }
+
+  // A 200 response that is not JSON means the endpoint does not exist on the
+  // target server (the SPA catch-all served index.html) — i.e. the target is
+  // running an older Songbird version without Songbird remote channel support.
+  const contentType = String(metaRes.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return { ok: false, error: "The target server does not support Songbird remote channels. It may be running an older version of Songbird." };
+  }
+
+  if (!metaRes.ok) {
+    const body = await metaRes.json().catch(() => ({}));
+    return { ok: false, error: body?.error || `Target server returned ${metaRes.status}.` };
+  }
+
+  const metaData = await metaRes.json().catch(() => null);
+  if (!metaData || !metaData.username) {
+    return { ok: false, error: "Target server returned an unexpected response." };
+  }
+
+  return {
+    ok: true,
+    sourceUsername: String(metaData.username || candidateUsername).toLowerCase(),
+    channelName: String(metaData.name || "").trim(),
+    avatarUrl: metaData.avatarUrl || null,
+    color: metaData.color || "#10b981",
+  };
+}
+
+async function fetchSongbirdJson(url, timeoutMs = 15_000) {
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    // Non-JSON 200 means the endpoint doesn't exist (SPA catch-all served HTML)
+    // — the target server is running an older Songbird version.
+    throw new Error(
+      "Target server does not support Songbird remote channels (outdated version).",
+    );
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || `Target server returned ${res.status}.`);
+  }
+  return res.json();
 }
 
 function sleep(ms) {
@@ -681,7 +765,9 @@ function createRemoteChannelManager(deps = {}) {
   const apiId = Number(config.telegramApiId || 0);
   const apiHash = String(config.telegramApiHash || "").trim();
   const sessionString = String(config.telegramSessionString || "").trim();
-  const enabled = Boolean(config.enabled && apiId && apiHash && sessionString);
+  // The manager is enabled if the feature is on — Songbird sources work without
+  // Telegram credentials. Telegram sources additionally require apiId/hash/session.
+  const enabled = Boolean(config.enabled);
   const pollIntervalMs = Math.max(1000, Number(config.pollIntervalMs || 5000));
   const pollLimit = Math.max(1, Math.min(100, Number(config.telegramPollLimit || 50)));
   // Sync metadata once every 60 poll cycles (e.g., every 5 minutes if polling every 5s)
@@ -1072,6 +1158,12 @@ function createRemoteChannelManager(deps = {}) {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(15_000),
       });
+      const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/json")) {
+        throw new Error(
+          "Target server does not support Songbird remote channels (outdated version).",
+        );
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
@@ -1259,8 +1351,128 @@ function createRemoteChannelManager(deps = {}) {
     return { queued, initialized: false };
   }
 
+  async function pollSongbirdSource(source) {
+    const sourceUrl = String(source.source_url || "").trim();
+    const channelUsername = String(source.source_username || "").trim();
+    if (!sourceUrl || !channelUsername) {
+      throw new Error("Songbird source URL or channel username is not configured.");
+    }
+
+    const lastMessageId = Number(source.last_remote_message_id || 0) || 0;
+    const pollLimitSb = Math.max(1, Math.min(100, pollLimit));
+
+    // On first poll, just record the latest message ID without mirroring history.
+    if (!lastMessageId) {
+      const initUrl = `${sourceUrl}/api/channels/${encodeURIComponent(channelUsername)}/messages?limit=1`;
+      const data = await fetchSongbirdJson(initUrl);
+      const latestId = Number(data?.messages?.[0]?.id || 0) || 0;
+      updateRemoteChannelSourceSeen(source.id, {
+        sourceUsername: channelUsername,
+        lastRemoteMessageId: latestId,
+        touch: true,
+      });
+      return { queued: 0, initialized: true };
+    }
+
+    const pollUrl =
+      `${sourceUrl}/api/channels/${encodeURIComponent(channelUsername)}/messages` +
+      `?afterId=${lastMessageId}&limit=${pollLimitSb}`;
+
+    const data = await fetchSongbirdJson(pollUrl);
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+    const ordered = messages
+      .filter((msg) => Number(msg?.id || 0) > lastMessageId)
+      .sort((a, b) => Number(a.id) - Number(b.id));
+
+    let queued = 0;
+    let maxSeenId = lastMessageId;
+
+    for (const msg of ordered) {
+      const msgId = Number(msg?.id || 0);
+      if (!msgId) continue;
+      maxSeenId = Math.max(maxSeenId, msgId);
+
+      const body = truncateBody(String(msg.body || "").trim(), messageMaxChars);
+      // Skip messages with no text body (file-only messages from a Songbird
+      // source are not yet supported — media streaming is Telegram-specific).
+      if (!body) continue;
+
+      const payloadJson = JSON.stringify({
+        message: { id: msgId, body, createdAt: msg.createdAt || null },
+        source: {
+          title: source.source_title || "",
+          username: channelUsername,
+          sourceUrl,
+        },
+        receivedAt: new Date().toISOString(),
+      });
+
+      const row = enqueueRemoteChannelQueueItem({
+        sourceId: source.id,
+        provider: "songbird",
+        sourceVersion: source.source_version,
+        // Reuse the telegram_message_id column for the remote message ID.
+        telegramMessageId: msgId,
+        payloadJson,
+      });
+      if (row?.id) queued += 1;
+    }
+
+    if (maxSeenId > lastMessageId) {
+      updateRemoteChannelSourceSeen(source.id, {
+        sourceUsername: channelUsername,
+        lastRemoteMessageId: maxSeenId,
+        touch: true,
+      });
+    }
+
+    return { queued, initialized: false };
+  }
+
+  async function pollSongbirdOnce() {
+    const sources = listEnabledRemoteChannelSources("songbird");
+    if (!sources.length) {
+      await sleep(pollIntervalMs);
+      return;
+    }
+
+    for (let i = 0; i < sources.length; i += queueConcurrency) {
+      if (stopped) return;
+      const batch = sources.slice(i, i + queueConcurrency);
+      await Promise.all(
+        batch.map(async (source) => {
+          if (stopped) return;
+          try {
+            await pollSongbirdSource(source);
+            if (source.last_error) updateRemoteChannelSourceError(source.id, "");
+          } catch (error) {
+            const message = errorMessage(error);
+            updateRemoteChannelSourceError(source.id, message);
+            log("poll-songbird:error", { sourceId: Number(source.id), error: message });
+          }
+        }),
+      );
+    }
+  }
+
+  async function runSongbirdPollLoop() {
+    // Songbird polling doesn't need a Telegram client — it's always runnable
+    // as long as the feature is enabled.
+    try {
+      while (!stopped) {
+        try {
+          await pollSongbirdOnce();
+        } catch (error) {
+          log("poll-songbird:loop-error", { error: errorMessage(error) });
+        }
+        await sleep(pollIntervalMs);
+      }
+    } finally {
+      // no state to clean up
+    }
+  }
+
   async function pollTelegramOnce() {
-    const sources = listEnabledRemoteChannelSources("telegram");
     if (!sources.length) {
       await sleep(pollIntervalMs);
       return;
@@ -1842,10 +2054,71 @@ function createRemoteChannelManager(deps = {}) {
     try {
       envelope = JSON.parse(String(item?.payload_json || "{}"));
     } catch {
-      markRemoteChannelQueueItemSkipped(item.id, "Invalid Telegram payload.");
+      markRemoteChannelQueueItemSkipped(item.id, "Invalid payload.");
       return;
     }
 
+    // --- Songbird provider: text-only, no Telegram client needed ---
+    if (currentSource.provider === "songbird") {
+      const remoteMessage = envelope?.message || {};
+      const body = truncateBody(String(remoteMessage?.body || "").trim(), messageMaxChars);
+      if (!body) {
+        markRemoteChannelQueueItemSkipped(item.id, "Songbird post has no text to mirror.");
+        return;
+      }
+
+      const chat = findChatById(Number(item.chat_id));
+      if (!chat || String(chat.type || "").toLowerCase() !== "channel") {
+        throw new Error("Target channel is no longer available.");
+      }
+      const authorId = resolveAuthorUserId(chat);
+      if (!authorId) throw new Error("Target channel has no owner to author remote posts.");
+      const author = findUserById(authorId);
+      if (!author) throw new Error("Target channel owner no longer exists.");
+
+      const remoteMessageId = Number(item.telegram_message_id || remoteMessage?.id || 0) || 0;
+      const clientRequestId = `remote:sb:${Number(item.source_id)}:${remoteMessageId}`.slice(0, 120);
+      const source = {
+        title: envelope?.source?.title || item.source_title || "",
+        username: envelope?.source?.username || item.source_username || "",
+        source_url: envelope?.source?.sourceUrl || currentSource.source_url || "",
+        source_title: item.source_title || "",
+        source_username: item.source_username || "",
+      };
+
+      const expiresAt = computeTextExpiryIso(messageTextRetentionDays);
+      const created = createOrReuseMessage(Number(chat.id), authorId, body, null, expiresAt, clientRequestId);
+      const msgId = Number(created?.id || 0);
+      if (!msgId) throw new Error("Unable to create mirrored message.");
+
+      if (!created?.deduped) {
+        setMessageForwardOrigin(msgId, {
+          label: buildSongbirdOriginLabel(source),
+          sourceChatId: null,
+          sourceUserId: null,
+          sourceUsername: null,
+          sourceAvatarUrl: currentSource.source_avatar_url || null,
+          sourceColor: "#10b981",
+        });
+        emitChatEvent(Number(chat.id), {
+          type: "chat_message",
+          chatId: Number(chat.id),
+          messageId: msgId,
+          username: author.username,
+          clientRequestId,
+          client_request_id: clientRequestId,
+          isRemoteChannelMessage: true,
+          body,
+        });
+        await sendPushForMirroredPost({ chat, authorId, body });
+      }
+
+      markRemoteChannelQueueItemDone(item.id, msgId);
+      updateRemoteChannelSourceError(item.source_id, "");
+      return;
+    }
+
+    // --- Telegram provider ---
     const remoteMessages = Array.isArray(envelope?.messages)
       ? envelope.messages.filter(Boolean)
       : [envelope?.message || {}];
@@ -2095,7 +2368,12 @@ function createRemoteChannelManager(deps = {}) {
       pollLimit,
       proxy: Boolean(connectionOptions.proxy),
     });
-    void runPollLoop();
+    // Run Telegram poll loop only when Telegram credentials are configured.
+    if (apiId && apiHash && sessionString) {
+      void runPollLoop();
+    }
+    // Songbird poll loop runs independently — no credentials needed.
+    void runSongbirdPollLoop();
     queueTimer = setInterval(() => {
       void runQueueLoop();
     }, queueIntervalMs);
@@ -2129,23 +2407,24 @@ function createRemoteChannelManager(deps = {}) {
     }
 
     if (source.provider === "songbird") {
-      // For Songbird sources, just verify the target server is reachable and
-      // the channel is still public. No persistent connection to maintain.
       const sourceUrl = String(source.source_url || source.source_raw || "").trim();
       if (!sourceUrl) {
         throw new Error("Songbird source URL is not configured.");
       }
       const channelUsername = String(source.source_username || "").trim();
       if (!channelUsername) {
-        throw new Error("Songbird source channel username is not resolved.");
+        throw new Error("Songbird source channel username is not resolved yet. Try saving the settings again.");
       }
-      // Verify the target server is reachable and the channel is public
-      const previewUrl = `${sourceUrl}/api/chats/${encodeURIComponent(channelUsername)}/public-preview`;
-      const response = await fetch(previewUrl, {
+      // Verify the target server is reachable and the channel is still public.
+      const metaUrl = `${sourceUrl}/api/channels/${encodeURIComponent(channelUsername)}/meta`;
+      const response = await fetch(metaUrl, {
         method: "GET",
         headers: { "Accept": "application/json" },
         signal: AbortSignal.timeout(10_000),
       });
+      if (response.status === 403) {
+        throw new Error("Target server is private. Only public servers can be used as a Songbird remote source.");
+      }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body?.error || `Target server returned ${response.status}.`);
@@ -2235,4 +2514,5 @@ export {
   normalizeSongbirdSource,
   normalizeTelegramSource,
   parseTelegramProxy,
+  resolveSongbirdSource,
 };

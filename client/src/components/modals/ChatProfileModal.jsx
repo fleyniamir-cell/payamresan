@@ -518,15 +518,17 @@ export default function ChatProfileModal({
                       <SatelliteDish size={18} />
                       Remote Channel
                     </span>
-                    <span className="text-xs text-slate-600 dark:text-slate-400">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
                       {remoteChannelStatus.source.provider === "telegram" ? (
-                        <FaTelegram size={18} className="inline-block align-middle" />
+                        <FaTelegram size={18} className="shrink-0" />
                       ) : remoteChannelStatus.source.provider === "songbird" ? (
                         <SongbirdIcon size={18} />
                       ) : (
                         <span>{remoteChannelStatus.source.provider}:</span>
-                      )}{" "}
-                      {remoteChannelStatus.source.sourceUsername || remoteChannelStatus.source.sourceChatId || remoteChannelStatus.source.sourceUrl}
+                      )}
+                      <span className="truncate">
+                        {remoteChannelStatus.source.sourceUsername || remoteChannelStatus.source.sourceChatId || remoteChannelStatus.source.sourceUrl}
+                      </span>
                     </span>
                   </div>
                 </div>

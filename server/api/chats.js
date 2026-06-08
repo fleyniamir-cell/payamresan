@@ -1,5 +1,5 @@
 import { createInviteToken } from "../lib/inviteTokens.js";
-import { normalizeSongbirdSource, normalizeTelegramSource } from "../lib/remoteChannels.js";
+import { normalizeSongbirdSource, normalizeTelegramSource, resolveSongbirdSource } from "../lib/remoteChannels.js";
 
 function registerChatRoutes(app, deps) {
   const {
@@ -57,6 +57,7 @@ function registerChatRoutes(app, deps) {
     FILE_UPLOAD,
     REMOTE_CHANNELS,
     ACCOUNT_CREATION,
+    getMessages,
     remoteChannelManager,
     upsertRemoteChannelSource,
   } = deps;
@@ -114,7 +115,7 @@ function registerChatRoutes(app, deps) {
     Boolean(REMOTE_CHANNELS?.enabled);
   const isTelegramAvailable = () =>
     Boolean(REMOTE_CHANNELS?.enabled && REMOTE_CHANNELS?.telegramConfigured);
-  const normalizeCreateRemoteChannel = ({
+  const normalizeCreateRemoteChannel = async ({
     remoteChannel,
     chatType,
     visibility,
@@ -202,6 +203,15 @@ function registerChatRoutes(app, deps) {
         if (!normalized.ok) {
           return { shouldSave: true, error: normalized.error, status: 400 };
         }
+        // Resolve the actual channel username from the target server.
+        const resolved = await resolveSongbirdSource(
+          normalized.sourceUrl,
+          normalized.inviteTarget,
+        );
+        if (!resolved.ok) {
+          return { shouldSave: true, error: resolved.error, status: 400 };
+        }
+        normalized = { ...normalized, sourceUsername: resolved.sourceUsername };
       } else if (rawSource) {
         const optionalNormalized = normalizeSongbirdSource(rawSource);
         if (optionalNormalized.ok) normalized = optionalNormalized;
@@ -521,7 +531,7 @@ function registerChatRoutes(app, deps) {
       String(visibility || "").toLowerCase() === "private"
         ? "private"
         : "public";
-    const remoteChannelConfig = normalizeCreateRemoteChannel({
+    const remoteChannelConfig = await normalizeCreateRemoteChannel({
       remoteChannel,
       chatType: normalizedType,
       visibility: normalizedVisibility,
@@ -743,6 +753,51 @@ function registerChatRoutes(app, deps) {
       username: chat.group_username || "",
       avatarUrl: normalizeGroupAvatarUrl(chat.group_avatar_url) || null,
       color: chat.group_color || "#10b981",
+    });
+  });
+
+  // Public unauthenticated messages endpoint used by remote Songbird servers
+  app.get("/api/channels/:username/messages", (req, res) => {
+    if (!ACCOUNT_CREATION) {
+      return res.status(403).json({ error: "This server is private." });
+    }
+
+    const username = String(req.params?.username || "").trim().toLowerCase();
+    if (!username) {
+      return res.status(400).json({ error: "Channel username is required." });
+    }
+
+    const chat = findChatByGroupUsername(username);
+    if (
+      !chat ||
+      String(chat.type || "").toLowerCase() !== "channel" ||
+      !isPublicChat(chat)
+    ) {
+      return res.status(404).json({ error: "Channel not found." });
+    }
+
+    const afterId = Number(req.query.afterId || 0) || 0;
+    const limitRaw = Number(req.query.limit || 50);
+    const limit = Math.max(1, Math.min(100, Number.isFinite(limitRaw) ? limitRaw : 50));
+
+    const { messages } = getMessages(Number(chat.id), {
+      afterId: afterId > 0 ? afterId : null,
+      limit,
+      viewerUserId: null,
+    });
+
+    // Return only the fields the remote poller needs — no auth-sensitive data.
+    const publicMessages = messages.map((msg) => ({
+      id: Number(msg.id),
+      body: String(msg.body || "").trim(),
+      createdAt: msg.created_at || null,
+      clientRequestId: msg.client_request_id || null,
+    }));
+
+    return res.json({
+      channelUsername: chat.group_username || username,
+      messages: publicMessages,
+      hasMore: publicMessages.length === limit,
     });
   });
 

@@ -1,4 +1,4 @@
-import { normalizeSongbirdSource, normalizeTelegramSource } from "../lib/remoteChannels.js";
+import { normalizeSongbirdSource, normalizeTelegramSource, resolveSongbirdSource } from "../lib/remoteChannels.js";
 
 function registerRemoteChannelRoutes(app, deps) {
   const {
@@ -205,6 +205,16 @@ function registerRemoteChannelRoutes(app, deps) {
         if (!normalized.ok) {
           return res.status(400).json({ error: normalized.error });
         }
+        // Resolve the actual channel username from the target server.
+        // This also validates the server is public and the channel exists.
+        const resolved = await resolveSongbirdSource(
+          normalized.sourceUrl,
+          normalized.inviteTarget,
+        );
+        if (!resolved.ok) {
+          return res.status(400).json({ error: resolved.error });
+        }
+        normalized = { ...normalized, sourceUsername: resolved.sourceUsername };
       } else if (rawSource) {
         const optionalNormalized = normalizeSongbirdSource(rawSource);
         if (optionalNormalized.ok) normalized = optionalNormalized;

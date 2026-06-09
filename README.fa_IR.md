@@ -469,13 +469,14 @@ nano .env
 | `REMOTE_CHANNEL_TELEGRAM_API_ID` | `عدد` | `0` | API ID تلگرام. |
 | `REMOTE_CHANNEL_TELEGRAM_API_HASH` | `رشته` | `""` | API hash تلگرام. |
 | `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` | `رشته` | `""` | مقدار Telegram StringSession. مثل رمز عبور از آن محافظت کنید. |
-| `REMOTE_CHANNEL_PROXY_URL` | `رشته` | `""` | آدرس proxy برای اتصال MTProto تلگرام. از |
-| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `عدد` | `5000` | فاصله زمانی بررسی sourceهای فعال Remote Channel در Telegram. (میلی‌ثانیه) |
+| `REMOTE_CHANNEL_TELEGRAM_PROXY_URL` | `رشته` | `""` | آدرس proxy برای اتصال MTProto تلگرام. (`REMOTE_CHANNEL_PROXY_URL` به‌عنوان fallback قدیمی پشتیبانی می‌شود.) |
+| `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` | `رشته` | `""` | آدرس proxy برای درخواست‌های خروجی از این سرور به سرورهای Songbird. |
+| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `عدد` | `5000` | فاصله زمانی بررسی sourceهای فعال Remote Channel. (میلی‌ثانیه) |
 | `REMOTE_CHANNEL_TELEGRAM_POLL_LIMIT` | `عدد` | `50` | حداکثر تعداد پست تلگرام که در هر poll برای هر source خوانده می‌شود. (`1` تا `100`) |
-| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `عدد` | `1000` | فاصله زمانی پردازش صف پست‌های تلگرام. (میلی‌ثانیه) |
+| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `عدد` | `1000` | فاصله زمانی پردازش صف پست‌های remote. (میلی‌ثانیه) |
 | `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `عدد` | `10` | حداکثر تلاش دوباره قبل از اینکه یک پست remote ناموفق علامت بخورد. |
 | `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `عدد` | `10` | حداکثر تعداد پست remote که در هر اجرای worker پردازش می‌شود. (`1` تا `50`) |
-| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `عدد` | `3` | تعداد آیتم‌هایی که به‌صورت همزمان در هر اجرای worker پردازش می‌شوند. همچنین تعداد sourceهای تلگرام که به‌صورت موازی poll می‌شوند را کنترل می‌کند. |
+| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `عدد` | `3` | تعداد آیتم‌هایی که به‌صورت همزمان در هر اجرای worker پردازش می‌شوند. همچنین تعداد sourceهایی که به‌صورت موازی poll می‌شوند را کنترل می‌کند. |
 | `REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS` | `عدد` | `300000` | زمانی که بعد از آن lock در حال پردازش قدیمی محسوب می‌شود و دوباره قابل تلاش است. (میلی‌ثانیه) |
 | `CHAT_PENDING_TEXT_TIMEOUT` | `عدد` | `300000` | مدت‌زمانی که بعد از آن پیام متنی pending ناموفق علامت می‌خورد. (میلی‌ثانیه) |
 | `CHAT_PENDING_FILE_TIMEOUT` | `عدد` | `1200000` | مدت‌زمان timeout برای آپلود فایل یا پیام فایل pending. (میلی‌ثانیه) |
@@ -549,16 +550,31 @@ sudo systemctl reload nginx
 
 ## راه‌اندازی Remote Channel
 
-Remote Channel به یک کانال عمومی Songbird اجازه می‌دهد پست‌های یک کانال Telegram را آینه کند. سرور Telegram را poll می‌کند، پست‌های جدید را وارد صف می‌کند، پیام‌های Songbird را با مالک کانال می‌سازد و وضعیت retry را در دیتابیس نگه می‌دارد. فقط مالک کانال می‌تواند source کانال را تنظیم کند.
+Remote Channel به یک کانال عمومی Songbird اجازه می‌دهد پست‌های یک کانال Telegram یا کانال دیگری روی سرور Songbird دیگری را آینه کند. فقط مالک کانال می‌تواند source کانال را تنظیم کند و در هر زمان فقط یک source می‌تواند فعال باشد.
 
-در اولین فعال‌سازی، Songbird وضعیت source را از آخرین پست Telegram شروع می‌کند و تاریخچه قبلی کانال را import نمی‌کند. پست‌هایی که بعد از آن منتشر شوند آینه می‌شوند.
+در اولین فعال‌سازی، Songbird وضعیت source را از آخرین پست شروع می‌کند و تاریخچه قبلی کانال را import نمی‌کند. پست‌هایی که بعد از آن منتشر شوند آینه می‌شوند.
+
+### منبع Songbird
+
+برای آینه‌کردن از سرور Songbird دیگری، یک **کانال عمومی** بسازید یا ویرایش کنید، **Remote Channel** را فعال کنید، **Songbird** را انتخاب کنید و لینک دعوت کانال عمومی از سرور مقصد را وارد کنید (مثلاً `https://other.server/invite/channelname`).
+
+**پیش‌نیازها:**
+- سرور مقصد باید `SIGN_UP=true` باشد (سرور عمومی).
+- کانال مقصد باید عمومی باشد.
+- سرور مقصد باید همین نسخه یا نسخه جدیدتری از Songbird را اجرا کند که endpoint های polling عمومی کانال را داشته باشد.
+
+نیازی به credential اضافه نیست. `REMOTE_CHANNEL=true` را روی این سرور تنظیم کنید و در صورت نیاز `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` را هم تنظیم کنید.
+
+### منبع Telegram
+
+برای آینه‌کردن از کانال Telegram، به credential های API تلگرام نیاز است.
 
 ### 1. ساخت credential های Telegram
 
 یک اپ [Telegram](https://my.telegram.org/apps) بسازید تا API ID و API hash آماده باشد. اگر سرور شما برای اتصال به Telegram به proxy نیاز دارد، URL آن را هم آماده کنید. schemeهای پشتیبانی‌شده شامل `http://`، `https://`، `socks4://`، `socks5://` و `mtproxy://` هستند.
 
 > [!WARNING]
-> من پیشنهاد میکنم که از اکانت اصلی و شخصی تلگرام بای این کار استفاده نکنید.
+> پیشنهاد میشود که از اکانت اصلی و شخصی تلگرام بای این کار استفاده نکنید.
 
 ### 2. تنظیم Remote Channel
 

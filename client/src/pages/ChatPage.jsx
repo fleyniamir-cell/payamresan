@@ -3490,11 +3490,13 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           : derivedSummary && isGenericBody
             ? derivedSummary
             : messageBody;
-        const body = baseBody
+      const body = messagePreviewEnabled
+        ? baseBody
           ? truncateText(baseBody, NOTIFICATION_PREVIEW_MAX_CHARS)
           : senderName
             ? `New message from ${senderName}.`
-            : "New message.";
+            : "New message"
+        : "New message.";
       try {
         const notification = new Notification(title, {
           body,

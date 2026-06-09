@@ -132,7 +132,7 @@ export function useChatNotifications({
     }
   }, [getCurrentPermission, notificationsSupported]);
 
-  const ensurePushSubscription = useCallback(async () => {
+  const ensurePushSubscription = useCallback(async ({ messagePreview } = {}) => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) {
       setPushSubscribeStatus("no-sw");
@@ -154,6 +154,9 @@ export function useChatNotifications({
       setPushSubscribeStatus("no-user");
       return null;
     }
+
+    const effectiveMessagePreview =
+      messagePreview !== undefined ? messagePreview : messagePreviewEnabled;
     const shouldRetryAfterError = (error) => {
       const message = String(error?.message || error || "").toLowerCase();
       if (!message) return false;
@@ -237,7 +240,7 @@ export function useChatNotifications({
       const res = await subscribePush({
         username: user?.username,
         subscription: json,
-        messagePreview: messagePreviewEnabled,
+        messagePreview: effectiveMessagePreview,
       });
       if (!res.ok) {
         setPushSubscribeStatus("err");
@@ -338,9 +341,10 @@ export function useChatNotifications({
   const handleToggleMessagePreview = useCallback(async () => {
     const next = !messagePreviewEnabled;
     persistMessagePreviewEnabled(next);
-    // Re-subscribe to push with the updated preference if currently active
+    // Re-subscribe to push with the updated preference if currently active.
+    // Pass `next` explicitly to avoid the stale closure on messagePreviewEnabled.
     if (notificationsActive) {
-      await ensurePushSubscription();
+      await ensurePushSubscription({ messagePreview: next });
     }
   }, [
     ensurePushSubscription,

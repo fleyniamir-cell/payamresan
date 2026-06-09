@@ -404,7 +404,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const messageBlobUrlsRef = useRef(new Set());
   const [sseConnected, setSseConnected] = useState(false);
   const lazyChunksPreloadedRef = useRef(false);
-  const [showFloatingLabel, setShowFloatingLabel] = useState(true);
+  const [showFloatingLabel, setShowFloatingLabel] = useState(false);
 
   useEffect(() => {
     setReplyTarget(null);
@@ -413,6 +413,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setPendingDeleteMessage(null);
     setForwardMessageTarget(null);
     setForwardSavedChat(null);
+    setShowFloatingLabel(false);
   }, [activeChatId]);
 
   useEffect(() => {

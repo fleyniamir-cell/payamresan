@@ -121,7 +121,7 @@ export default function ChatWindowPanel({
   permissionsPrompt = null,
   copyToastVisible = false,
   registerMessageRef = null,
-                                          showFloatingLabel
+  showFloatingLabel = false,
 }) {
   const MEDIA_CACHE_VERSION = 1;
   const MEDIA_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1600,7 +1600,7 @@ export default function ChatWindowPanel({
       ) : null}
 
       <div className="flex-1 min-h-0">
-        {activeChatId && floatingDay.key && isTimelineScrollable && showFloatingLabel ? (
+        {activeChatId && floatingDay.key && isTimelineScrollable ? (
           <div
             className="absolute left-1/2 z-[3] -translate-x-1/2"
             style={{
@@ -1616,6 +1616,10 @@ export default function ChatWindowPanel({
                   ? Math.max(0, (permissionBannerHeight || 48) + 12)
                   : 0
               }px)`,
+              // Keep the chip in the DOM at all times so floatingChipRef always
+              // has a valid layout position for updateFloatingDayFromScroll.
+              visibility: showFloatingLabel ? "visible" : "hidden",
+              pointerEvents: showFloatingLabel ? "auto" : "none",
             }}
           >
             <button

@@ -2908,6 +2908,18 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     }, MOBILE_CLOSE_ANIMATION_MS);
   };
 
+  // Deselect active chat on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && activeChatId) {
+        closeChat();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId]);
+
   useEffect(() => {
     if (!activeHeaderPeer?.username) return;
     let isMounted = true;

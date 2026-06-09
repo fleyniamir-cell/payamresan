@@ -783,6 +783,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   );
   const [isUpdatingChats, setIsUpdatingChats] = useState(false);
   const [sidebarScrollEpoch, setSidebarScrollEpoch] = useState(0);
+  const [chatsScrollToTopEpoch, setChatsScrollToTopEpoch] = useState(0);
   const [activePeer, setActivePeer] = useState(null);
   const [peerPresence, setPeerPresence] = useState({
     status: "offline",
@@ -6333,6 +6334,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         isConnected={isConnected}
         isUpdating={isUpdatingChats}
         scrollEpoch={sidebarScrollEpoch}
+        chatsScrollToTopEpoch={chatsScrollToTopEpoch}
         editMode={editMode}
         visibleChats={visibleChats}
         selectedChats={selectedChats}
@@ -6532,8 +6534,12 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         hidden={mobileTab === "chat" && activeChatId}
         mobileTab={mobileTab}
         onChats={() => {
-          setMobileTab("chats");
-          setSettingsPanel(null);
+          if (mobileTab === "chats") {
+            setChatsScrollToTopEpoch((prev) => prev + 1);
+          } else {
+            setMobileTab("chats");
+            setSettingsPanel(null);
+          }
         }}
         onSettings={() => setMobileTab("settings")}
       />

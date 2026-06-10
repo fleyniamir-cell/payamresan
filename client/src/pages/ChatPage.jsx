@@ -2920,7 +2920,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChatId]);
 
   useEffect(() => {
@@ -5614,6 +5613,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setMentionProfile(null);
   };
 
+  const handleProfileRemoteChannelStatusChange = useCallback((status) => {
+    setProfileRemoteChannelStatus(status ? { ...status, _chatId: activeChat?.id } : null);
+  }, [activeChat?.id]);
+
   const openSelfProfileEditor = () => {
     closeProfileModal();
     setShowSettings(false);
@@ -6741,9 +6744,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             inviteLink={profileInviteLink}
             inviteLinkLoading={profileInviteLinkLoading}
             initialRemoteChannelStatus={profileRemoteChannelStatus}
-            onRemoteChannelStatusChange={(status) =>
-              setProfileRemoteChannelStatus(status ? { ...status, _chatId: activeChat?.id } : null)
-            }
+            onRemoteChannelStatusChange={handleProfileRemoteChannelStatusChange}
             canViewInvite={canCurrentUserViewInvite}
             readOnly={Boolean(
               isMentionProfileReadOnly ||

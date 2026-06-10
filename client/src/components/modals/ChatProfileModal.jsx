@@ -136,7 +136,7 @@ export default function ChatProfileModal({
     const intervalId = setInterval(fetchRemoteStatus, 10000);
 
     return () => clearInterval(intervalId);
-  }, [open, chat?.id, chat?.type, currentUser?.username, remoteChannelAvailable]);
+  }, [open, chat?.id, chat?.type, currentUser?.username, remoteChannelAvailable, onRemoteChannelStatusChange]);
 
   // (Connection test is triggered manually by clicking the Queue Status box)
 

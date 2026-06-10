@@ -130,6 +130,37 @@ function normalizeSongbirdSource(value) {
 }
 
 /**
+ * Returns true if the hostname is a private/loopback/link-local address that
+ * should never be the target of a server-side outbound request.
+ * Blocks SSRF against internal services and cloud metadata endpoints.
+ */
+function isPrivateHost(hostname) {
+  const h = String(hostname || "").toLowerCase().trim();
+
+  // Loopback
+  if (h === "localhost" || h === "::1" || /^127\./.test(h)) return true;
+
+  // Cloud metadata endpoints (AWS, GCP, Azure, Oracle, DigitalOcean, etc.)
+  if (h === "169.254.169.254" || h === "metadata.google.internal") return true;
+
+  // IPv4 private ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+  if (/^10\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+
+  // Link-local (169.254.x.x covers AWS/GCP metadata; block the whole range)
+  if (/^169\.254\./.test(h)) return true;
+
+  // IPv6 private / link-local (fe80::, fc00::, fd00::)
+  if (/^fe[89ab][0-9a-f]:/i.test(h) || /^fc[0-9a-f]{2}:/i.test(h) || /^fd[0-9a-f]{2}:/i.test(h)) return true;
+
+  // Unspecified / broadcast
+  if (h === "0.0.0.0" || h === "255.255.255.255") return true;
+
+  return false;
+}
+
+/**
  * Resolve a Songbird invite link against the target server to get the
  * real channel username. Verifies the server is public and the channel exists.
  *
@@ -144,6 +175,16 @@ async function resolveSongbirdSource(sourceUrl, inviteTarget) {
   const candidateUsername = String(inviteTarget || "").trim().toLowerCase().replace(/^@+/, "");
   if (!candidateUsername) {
     return { ok: false, error: "Songbird source channel username could not be determined from the invite link." };
+  }
+
+  // SSRF protection: reject requests to private/internal hosts.
+  try {
+    const parsedSourceUrl = new URL(sourceUrl);
+    if (isPrivateHost(parsedSourceUrl.hostname)) {
+      return { ok: false, error: "Songbird source URL must point to a public server." };
+    }
+  } catch {
+    return { ok: false, error: "Songbird source URL is invalid." };
   }
 
   const metaUrl = `${sourceUrl}/api/channels/${encodeURIComponent(candidateUsername)}/meta`;

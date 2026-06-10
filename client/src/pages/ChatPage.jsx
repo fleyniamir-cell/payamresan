@@ -337,6 +337,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileModalMember, setProfileModalMember] = useState(null);
   const [profileInviteLink, setProfileInviteLink] = useState("");
+  const [profileInviteLinkLoading, setProfileInviteLinkLoading] = useState(false);
   const [mentionProfile, setMentionProfile] = useState(null);
   const [mentionRefreshToken, _setMentionRefreshToken] = useState(0);
   const [editingGroup, setEditingGroup] = useState(false);
@@ -5491,8 +5492,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const openActiveChatProfile = async () => {
     if (!activeChat) return;
     setProfileModalMember(null);
+    setProfileInviteLink("");
     setProfileModalOpen(true);
     if (activeChat.type === "group" || activeChat.type === "channel") {
+      setProfileInviteLinkLoading(true);
       try {
         const res = await getGroupInviteLink(activeChat.id);
         const data = await res.json();
@@ -5503,6 +5506,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         }
       } catch {
         setProfileInviteLink("");
+      } finally {
+        setProfileInviteLinkLoading(false);
       }
     } else {
       setProfileInviteLink("");
@@ -5596,6 +5601,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setProfileModalOpen(false);
     setProfileModalMember(null);
     setProfileInviteLink("");
+    setProfileInviteLinkLoading(false);
     setMentionProfile(null);
   };
 
@@ -6724,6 +6730,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             currentUser={user}
             muted={activeChatMuted}
             inviteLink={profileInviteLink}
+            inviteLinkLoading={profileInviteLinkLoading}
             canViewInvite={canCurrentUserViewInvite}
             readOnly={Boolean(
               isMentionProfileReadOnly ||

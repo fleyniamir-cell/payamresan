@@ -56,6 +56,7 @@ export default function ChatProfileModal({
   currentUser,
   muted,
   inviteLink,
+  inviteLinkLoading = false,
   canViewInvite,
   onClose,
   onOpenChat,
@@ -481,14 +482,21 @@ export default function ChatProfileModal({
             <button
               type="button"
               onClick={handleCopyInviteLink}
-              disabled={!inviteLink}
+              disabled={!inviteLink || inviteLinkLoading}
               className="mt-2 flex w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-left text-xs text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300/60 disabled:cursor-default disabled:opacity-70 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
               aria-label="Copy invite link"
             >
               <span className="min-w-0 flex-1 break-all">
-                {inviteLink || "No invite link available."}
+                {inviteLinkLoading ? (
+                  <span className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                    <LoaderCircle size={13} className="animate-spin text-emerald-500" />
+                    Loading...
+                  </span>
+                ) : (
+                  inviteLink || "No invite link available."
+                )}
               </span>
-              {inviteLink ? (
+              {inviteLink && !inviteLinkLoading ? (
                 <span className="ml-1 shrink-0 text-emerald-600 dark:text-emerald-400">
                   {inviteCopied ? <Check size={14} /> : <Copy size={14} />}
                 </span>

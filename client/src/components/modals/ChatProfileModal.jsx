@@ -73,10 +73,12 @@ export default function ChatProfileModal({
   readOnly = false,
   membersBatchSize = MEMBERS_BATCH_SIZE,
   remoteChannelAvailable = false,
+  initialRemoteChannelStatus = null,
+  onRemoteChannelStatusChange,
 }) {
   const [memberQuery, setMemberQuery] = useState("");
   const [memberLimit, setMemberLimit] = useState(membersBatchSize);
-  const [remoteChannelStatus, setRemoteChannelStatus] = useState(null);
+  const [remoteChannelStatus, setRemoteChannelStatus] = useState(initialRemoteChannelStatus);
   const [remoteActionLoading, setRemoteActionLoading] = useState(false);
   const [testConnectionLoading, setTestConnectionLoading] = useState(false);
   const [testConnectionResult, setTestConnectionResult] = useState(null); // 'success', 'error', or null
@@ -102,6 +104,12 @@ export default function ChatProfileModal({
     return () => observer.disconnect();
   });
 
+  // Sync initial status when the chat changes (e.g. opening modal for a different channel)
+  useEffect(() => {
+    setRemoteChannelStatus(initialRemoteChannelStatus ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat?.id]);
+
   // Fetch remote channel status for channels
   useEffect(() => {
     if (!open || chat?.type !== "channel" || !remoteChannelAvailable || !currentUser?.username) {
@@ -117,6 +125,7 @@ export default function ChatProfileModal({
         const data = await res.json();
         if (res.ok) {
           setRemoteChannelStatus(data);
+          onRemoteChannelStatusChange?.(data);
         }
       } catch (error) {
         console.error("Failed to fetch remote channel status:", error);
@@ -124,18 +133,12 @@ export default function ChatProfileModal({
     };
 
     fetchRemoteStatus();
-    const intervalId = setInterval(fetchRemoteStatus, 3000);
+    const intervalId = setInterval(fetchRemoteStatus, 10000);
 
     return () => clearInterval(intervalId);
   }, [open, chat?.id, chat?.type, currentUser?.username, remoteChannelAvailable]);
 
-  // Auto-test connection on modal open (only if remote channel is enabled for this chat)
-  useEffect(() => {
-    if (!open || chat?.type !== "channel" || !remoteChannelAvailable || !chat?.id) return;
-    if (!Number(chat?.remote_channel_enabled || 0)) return;
-    handleTestConnection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, chat?.id, chat?.type, remoteChannelAvailable, chat?.remote_channel_enabled]);
+  // (Connection test is triggered manually by clicking the Queue Status box)
 
   // Remote channel action handlers (owner only)
   const handlePauseRemoteChannel = async () => {
@@ -145,9 +148,11 @@ export default function ChatProfileModal({
       const res = await pauseRemoteChannel(chat.id);
       if (res.ok) {
         // Optimistically reflect the paused state; polling will sync the rest.
-        setRemoteChannelStatus((prev) =>
-          prev?.source ? { ...prev, source: { ...prev.source, paused: true } } : prev,
-        );
+        setRemoteChannelStatus((prev) => {
+          const next = prev?.source ? { ...prev, source: { ...prev.source, paused: true } } : prev;
+          onRemoteChannelStatusChange?.(next);
+          return next;
+        });
       }
     } catch (error) {
       console.error("Failed to pause remote channel:", error);
@@ -163,9 +168,11 @@ export default function ChatProfileModal({
       const res = await resumeRemoteChannel(chat.id);
       if (res.ok) {
         // Optimistically reflect the resumed state; polling will sync the rest.
-        setRemoteChannelStatus((prev) =>
-          prev?.source ? { ...prev, source: { ...prev.source, paused: false } } : prev,
-        );
+        setRemoteChannelStatus((prev) => {
+          const next = prev?.source ? { ...prev, source: { ...prev.source, paused: false } } : prev;
+          onRemoteChannelStatusChange?.(next);
+          return next;
+        });
       }
     } catch (error) {
       console.error("Failed to resume remote channel:", error);
@@ -179,11 +186,18 @@ export default function ChatProfileModal({
     setRemoteActionLoading(true);
     try {
       await skipRemoteChannelQueueItem(chat.id);
-      // Optimistically clear the queue display — the polling interval will
-      // refresh the real counts within 3 seconds.
-      setRemoteChannelStatus((prev) =>
-        prev ? { ...prev, queue: { ...(prev.queue || {}), pending: 0, processing: 0, retry: 0 } } : prev,
-      );
+      // Optimistically clear active queue counts; polling will refresh real counts.
+      setRemoteChannelStatus((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          source: prev.source
+            ? { ...prev.source, queue: { ...(prev.source.queue || {}), pending: 0, processing: 0, retry: 0 } }
+            : prev.source,
+        };
+        onRemoteChannelStatusChange?.(next);
+        return next;
+      });
     } catch (error) {
       console.error("Failed to skip queue item:", error);
     } finally {
@@ -196,11 +210,18 @@ export default function ChatProfileModal({
     setRemoteActionLoading(true);
     try {
       await skipAllRemoteChannelQueueItems(chat.id);
-      // Optimistically clear the queue display — the polling interval will
-      // refresh the real counts within 3 seconds.
-      setRemoteChannelStatus((prev) =>
-        prev ? { ...prev, queue: { ...(prev.queue || {}), pending: 0, processing: 0, retry: 0 } } : prev,
-      );
+      // Optimistically clear active queue counts; polling will refresh real counts.
+      setRemoteChannelStatus((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          source: prev.source
+            ? { ...prev.source, queue: { ...(prev.source.queue || {}), pending: 0, processing: 0, retry: 0 } }
+            : prev.source,
+        };
+        onRemoteChannelStatusChange?.(next);
+        return next;
+      });
     } catch (error) {
       console.error("Failed to skip all queue items:", error);
     } finally {
@@ -230,7 +251,6 @@ export default function ChatProfileModal({
   const handleClose = () => {
     setMemberQuery("");
     setMemberLimit(membersBatchSize);
-    setRemoteChannelStatus(null);
     setRemoteActionLoading(false);
     setTestConnectionLoading(false);
     setTestConnectionResult(null);

@@ -338,6 +338,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const [profileModalMember, setProfileModalMember] = useState(null);
   const [profileInviteLink, setProfileInviteLink] = useState("");
   const [profileInviteLinkLoading, setProfileInviteLinkLoading] = useState(false);
+  const [profileRemoteChannelStatus, setProfileRemoteChannelStatus] = useState(null);
   const [mentionProfile, setMentionProfile] = useState(null);
   const [mentionRefreshToken, _setMentionRefreshToken] = useState(0);
   const [editingGroup, setEditingGroup] = useState(false);
@@ -5493,6 +5494,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     if (!activeChat) return;
     setProfileModalMember(null);
     setProfileInviteLinkLoading(false);
+    // Clear cached remote channel status when switching to a different chat
+    setProfileRemoteChannelStatus((prev) => {
+      const prevChatId = prev?._chatId;
+      return prevChatId && Number(prevChatId) !== Number(activeChat.id) ? null : prev;
+    });
     setProfileModalOpen(true);
     if (activeChat.type === "group" || activeChat.type === "channel") {
       // Build invite link from already-available chat data — no round-trip needed
@@ -6734,6 +6740,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             muted={activeChatMuted}
             inviteLink={profileInviteLink}
             inviteLinkLoading={profileInviteLinkLoading}
+            initialRemoteChannelStatus={profileRemoteChannelStatus}
+            onRemoteChannelStatusChange={(status) =>
+              setProfileRemoteChannelStatus(status ? { ...status, _chatId: activeChat?.id } : null)
+            }
             canViewInvite={canCurrentUserViewInvite}
             readOnly={Boolean(
               isMentionProfileReadOnly ||

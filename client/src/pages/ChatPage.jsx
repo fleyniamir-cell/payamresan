@@ -5492,22 +5492,25 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const openActiveChatProfile = async () => {
     if (!activeChat) return;
     setProfileModalMember(null);
-    setProfileInviteLink("");
+    setProfileInviteLinkLoading(false);
     setProfileModalOpen(true);
     if (activeChat.type === "group" || activeChat.type === "channel") {
-      setProfileInviteLinkLoading(true);
-      try {
-        const res = await getGroupInviteLink(activeChat.id);
-        const data = await res.json();
-        if (res.ok) {
-          setProfileInviteLink(String(data?.inviteLink || ""));
-        } else {
+      // Build invite link from already-available chat data — no round-trip needed
+      const localLink = buildInviteLinkForChat(activeChat);
+      if (localLink) {
+        setProfileInviteLink(localLink);
+      } else {
+        // Fallback: fetch from server if token is somehow missing locally
+        setProfileInviteLinkLoading(true);
+        try {
+          const res = await getGroupInviteLink(activeChat.id);
+          const data = await res.json();
+          setProfileInviteLink(res.ok ? String(data?.inviteLink || "") : "");
+        } catch {
           setProfileInviteLink("");
+        } finally {
+          setProfileInviteLinkLoading(false);
         }
-      } catch {
-        setProfileInviteLink("");
-      } finally {
-        setProfileInviteLinkLoading(false);
       }
     } else {
       setProfileInviteLink("");

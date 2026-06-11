@@ -1157,6 +1157,15 @@ function registerMessageRoutes(app, deps) {
       bodyLength: String(body || "").length,
     });
 
+    // Respond to the sender immediately — before the SSE broadcast.
+    // This lets the client clear the pending state without waiting for
+    // all member connections to be written to.
+    res.json({
+      id,
+      expiresAt,
+      deduped: Boolean(created?.deduped),
+    });
+
     if (!created?.deduped) {
       emitChatEvent(Number(chatId), {
         type: "chat_message",
@@ -1167,12 +1176,6 @@ function registerMessageRoutes(app, deps) {
         replyToMessageId,
       });
     }
-
-    res.json({
-      id,
-      expiresAt,
-      deduped: Boolean(created?.deduped),
-    });
 
     if (created?.deduped) {
       return;

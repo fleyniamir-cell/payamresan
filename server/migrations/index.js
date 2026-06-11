@@ -28,6 +28,7 @@ import { migration026RemoteChannelPause } from "./026-remote-channel-pause.js";
 import { migration027RemoteChannelSongbird } from "./027-remote-channel-songbird.js";
 import { migration as migration028PushMessagePreview } from "./028-push-message-preview.js";
 import { migration029RemoteChannelQueueSummaryIndex } from "./029-remote-channel-queue-summary-index.js";
+import { migration030HiddenMessagesCompositeIndex } from "./030-hidden-messages-composite-index.js";
 
 export const migrations = [
   migration001InitialSchema,
@@ -59,4 +60,5 @@ export const migrations = [
   migration027RemoteChannelSongbird,
   migration028PushMessagePreview,
   migration029RemoteChannelQueueSummaryIndex,
+  migration030HiddenMessagesCompositeIndex,
 ];

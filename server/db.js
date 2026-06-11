@@ -1248,6 +1248,39 @@ export function listChatMembers(chatId) {
   );
 }
 
+/**
+ * Batch version of listChatMembers — fetches members for multiple chats in
+ * a single query instead of one query per chat, eliminating the N+1 pattern
+ * in the /api/chats list endpoint.
+ *
+ * @param {number[]} chatIds
+ * @returns {Map<number, Array>} map of chatId → members array
+ */
+export function listChatMembersForChats(chatIds = []) {
+  const ids = chatIds.map(Number).filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return new Map();
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = getAll(
+    `
+    SELECT chat_members.chat_id,
+           users.id, users.username, users.nickname, users.avatar_url, users.color, users.status,
+           chat_members.role
+    FROM chat_members
+    JOIN users ON users.id = chat_members.user_id
+    WHERE chat_members.chat_id IN (${placeholders})
+    ORDER BY chat_members.chat_id, users.username
+    `,
+    ids,
+  );
+  const map = new Map();
+  for (const row of rows) {
+    const cid = Number(row.chat_id);
+    if (!map.has(cid)) map.set(cid, []);
+    map.get(cid).push(row);
+  }
+  return map;
+}
+
 export function getChatMemberRole(chatId, userId) {
   const row = getRow(
     "SELECT role FROM chat_members WHERE chat_id = ? AND user_id = ?",
@@ -1859,9 +1892,9 @@ export function getMessages(chatId, options = {}) {
   const beforeSql = hasBefore
     ? `
        AND (
-         julianday(chat_messages.created_at) < julianday(?)
+         chat_messages.created_at < ?
          OR (
-           julianday(chat_messages.created_at) = julianday(?)
+           chat_messages.created_at = ?
            AND chat_messages.id < ?
          )
        )`
@@ -1872,9 +1905,9 @@ export function getMessages(chatId, options = {}) {
   const afterSql = hasAfter
     ? `
        AND (
-         julianday(chat_messages.created_at) > julianday(?)
+         chat_messages.created_at > ?
          OR (
-           julianday(chat_messages.created_at) = julianday(?)
+           chat_messages.created_at = ?
            AND chat_messages.id >= ?
          )
        )`
@@ -1908,8 +1941,8 @@ export function getMessages(chatId, options = {}) {
   // starting from the anchor. Without afterId we keep the existing behaviour
   // of fetching descending (newest-first) and reversing.
   const orderSql = hasAfter
-    ? "ORDER BY julianday(chat_messages.created_at) ASC, chat_messages.id ASC"
-    : "ORDER BY julianday(chat_messages.created_at) DESC, chat_messages.id DESC";
+    ? "ORDER BY chat_messages.created_at ASC, chat_messages.id ASC"
+    : "ORDER BY chat_messages.created_at DESC, chat_messages.id DESC";
 
   const rowsRaw = getAll(
     `

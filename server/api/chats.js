@@ -30,6 +30,7 @@ function registerChatRoutes(app, deps) {
     isMember,
     isVideoFileProcessing,
     listChatMembers,
+    listChatMembersForChats,
     listChatsForUser,
     listMessageFilesByMessageIds,
     listUsers,
@@ -292,14 +293,17 @@ function registerChatRoutes(app, deps) {
       return res.status(404).json({ error: "User not found." });
     }
 
-    let chats = listChatsForUser(user.id).map((conv) => {
-      const members = listChatMembers(conv.id).map((member) => ({
-        ...member,
-        avatar_url: ensureAvatarExists(member.id, member.avatar_url),
-      }));
-
-      return { ...conv, members };
-    });
+    let chats = (() => {
+      const convs = listChatsForUser(user.id);
+      const membersMap = listChatMembersForChats(convs.map((c) => c.id));
+      return convs.map((conv) => {
+        const members = (membersMap.get(Number(conv.id)) || []).map((member) => ({
+          ...member,
+          avatar_url: ensureAvatarExists(member.id, member.avatar_url),
+        }));
+        return { ...conv, members };
+      });
+    })();
 
     const initialLastMessageIds = chats
       .map((chat) => Number(chat.last_message_id || 0))
@@ -316,14 +320,17 @@ function registerChatRoutes(app, deps) {
           });
         });
       }
-      chats = listChatsForUser(user.id).map((conv) => {
-        const members = listChatMembers(conv.id).map((member) => ({
-          ...member,
-          avatar_url: ensureAvatarExists(member.id, member.avatar_url),
-        }));
-
-        return { ...conv, members };
-      });
+      chats = (() => {
+        const convs = listChatsForUser(user.id);
+        const membersMap = listChatMembersForChats(convs.map((c) => c.id));
+        return convs.map((conv) => {
+          const members = (membersMap.get(Number(conv.id)) || []).map((member) => ({
+            ...member,
+            avatar_url: ensureAvatarExists(member.id, member.avatar_url),
+          }));
+          return { ...conv, members };
+        });
+      })();
     }
 
     const lastMessageIds = chats

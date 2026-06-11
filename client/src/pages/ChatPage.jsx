@@ -2061,6 +2061,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       status,
       lastSeen: normalizedLastSeen,
     });
+    // Evict oldest entries when the map exceeds a reasonable size to prevent
+    // unbounded growth in large communities across long sessions.
+    if (presenceStateRef.current.size > 500) {
+      presenceStateRef.current.delete(presenceStateRef.current.keys().next().value);
+    }
     setChats((prev) =>
       prev.map((chat) => {
         const members = Array.isArray(chat?.members) ? chat.members : [];
@@ -3022,9 +3027,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   useEffect(() => {
     const interval = setInterval(() => {
-      let changed = false;
-      setChats((prev) =>
-        prev.map((chat) => {
+      // Only rebuild chats state if at least one member status actually changed.
+      setChats((prev) => {
+        let anyChanged = false;
+        const next = prev.map((chat) => {
           if (!Array.isArray(chat?.members) || chat.members.length === 0) return chat;
           let chatChanged = false;
           const nextMembers = chat.members.map((member) => {
@@ -3038,10 +3044,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             return { ...member, status: nextStatus };
           });
           if (!chatChanged) return chat;
-          changed = true;
+          anyChanged = true;
           return { ...chat, members: nextMembers };
-        }),
-      );
+        });
+        return anyChanged ? next : prev;
+      });
 
       if (activeHeaderPeer?.username) {
         const snapshot = presenceStateRef.current.get(
@@ -3059,10 +3066,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             return { status: nextStatus, lastSeen: snapshot.lastSeen || null };
           });
         }
-      }
-
-      if (!changed) {
-        // no-op: we still refresh peerPresence above
       }
     }, 1500);
 
@@ -4124,6 +4127,15 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   useEffect(() => {
     if (!activeChatId) return;
+    // Only start the timeout-checker interval when there are actually pending
+    // messages. This avoids a 1-second setMessages call when the queue is idle.
+    const hasPending = messages.some(
+      (msg) =>
+        msg._delivery === "sending" &&
+        !msg._awaitingServerEcho &&
+        !Number(msg?._serverId || 0),
+    );
+    if (!hasPending) return;
     const interval = setInterval(() => {
       setMessages((prev) => {
         const now = Date.now();
@@ -4149,7 +4161,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       });
     }, CHAT_PAGE_CONFIG.pendingStatusCheckIntervalMs);
     return () => clearInterval(interval);
-  }, [activeChatId]);
+  }, [activeChatId, messages]);
 
   useEffect(() => {
     if (!activeChatId || !isAppActive) return;

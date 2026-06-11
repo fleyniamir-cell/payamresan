@@ -117,6 +117,7 @@ import {
   updateRemoteChannelSourcePaused,
   updateRemoteChannelSourceSeen,
   upsertRemoteChannelSource,
+  purgeOldRemoteChannelQueueItems,
 } from "./db.js";
 
 process.title = "songbird-server";
@@ -480,27 +481,47 @@ const {
 function backfillStorageEncryption() {
   if (!storageEncryption.isEnabled()) return;
 
-  try {
-    const pendingMessages = adminGetAll(
+  // Process messages in batches with async yields to avoid blocking the event
+  // loop for extended periods on large databases.
+  const BATCH_SIZE = 200;
+
+  function encryptMessageBatch(offset) {
+    const batch = adminGetAll(
       `SELECT id, body
        FROM chat_messages
-       WHERE body IS NOT NULL
-         AND body != ''`,
+       WHERE body IS NOT NULL AND body != ''
+       LIMIT ? OFFSET ?`,
+      [BATCH_SIZE, offset],
     );
-    let encryptedMessages = 0;
 
-    pendingMessages.forEach((row) => {
+    if (!batch.length) return 0;
+
+    let encryptedInBatch = 0;
+    batch.forEach((row) => {
       const body = String(row?.body || "");
       const nextBody = storageEncryption.encryptText(body);
       if (nextBody === body) return;
-
       adminRun("UPDATE chat_messages SET body = ? WHERE id = ?", [
         nextBody,
         Number(row.id),
       ]);
-      encryptedMessages += 1;
+      encryptedInBatch += 1;
     });
 
+    if (encryptedInBatch > 0) adminSave();
+
+    if (batch.length === BATCH_SIZE) {
+      // Schedule next batch without blocking the event loop.
+      setImmediate(() => encryptMessageBatch(offset + BATCH_SIZE));
+    }
+    return encryptedInBatch;
+  }
+
+  try {
+    // Start the message encryption batching.
+    encryptMessageBatch(0);
+
+    // Files and avatars are typically fewer in number; process them once.
     const fileRows = adminGetAll("SELECT stored_name FROM chat_message_files");
     let encryptedFiles = 0;
 
@@ -530,10 +551,10 @@ function backfillStorageEncryption() {
       );
     }
 
-    if (encryptedMessages > 0 || encryptedFiles > 0 || encryptedAvatars > 0) {
+    if (encryptedFiles > 0 || encryptedAvatars > 0) {
       adminSave();
       console.log(
-        `[storage-encryption] encrypted ${encryptedMessages} message(s), ${encryptedFiles} file(s), and ${encryptedAvatars} avatar file(s) at rest.`,
+        `[storage-encryption] encrypted ${encryptedFiles} file(s) and ${encryptedAvatars} avatar file(s) at rest.`,
       );
     }
   } catch (error) {
@@ -981,6 +1002,28 @@ setImmediate(() => {
   }
 });
 remoteChannelManager.start();
+
+// Periodically purge old done/skipped/failed remote channel queue rows to
+// prevent the table growing without bound. Runs every 24 hours; keeps rows
+// that are less than 7 days old.
+if (REMOTE_CHANNEL) {
+  const QUEUE_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  const QUEUE_PURGE_KEEP_DAYS = 7;
+  const runQueuePurge = () => {
+    try {
+      const cutoff = new Date(
+        Date.now() - QUEUE_PURGE_KEEP_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      purgeOldRemoteChannelQueueItems(cutoff);
+    } catch (_) {
+      // best effort — don't crash the server if purge fails
+    }
+  };
+  // Run once at startup to clean up any accumulated rows.
+  setImmediate(runQueuePurge);
+  const queuePurgeTimer = setInterval(runQueuePurge, QUEUE_PURGE_INTERVAL_MS);
+  if (typeof queuePurgeTimer.unref === "function") queuePurgeTimer.unref();
+}
 
 app.listen(port, () => {
   console.log(`Songbird server running on http://localhost:${port}`);

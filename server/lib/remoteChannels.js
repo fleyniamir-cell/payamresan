@@ -843,6 +843,9 @@ function createRemoteChannelManager(deps = {}) {
   const uploadRootDir = String(config.uploadRootDir || "").trim();
   const avatarUploadRootDir = String(config.avatarUploadRootDir || "").trim();
   const lockOwner = `songbird-${process.pid}`;
+  // Entity cache: keyed by "sourceId:sourceRef". Cap at 200 entries with LRU
+  // eviction to avoid unbounded growth from Telegram entity objects.
+  const ENTITY_CACHE_MAX = 200;
   const entityCache = new Map();
   const metadataSyncTimestamps = new Map(); // sourceId → lastSyncTimestamp
   const connectionOptions = getTelegramClientConnectionOptions(config.proxyUrl, (message) =>
@@ -1076,6 +1079,11 @@ function createRemoteChannelManager(deps = {}) {
     let entity = options.forceRefresh ? null : entityCache.get(cacheKey);
     if (!entity) {
       entity = await activeClient.getEntity(ref);
+      // Enforce a maximum cache size using simple LRU eviction: delete the
+      // oldest entry (first inserted) when the cap is reached.
+      if (entityCache.size >= ENTITY_CACHE_MAX) {
+        entityCache.delete(entityCache.keys().next().value);
+      }
       entityCache.set(cacheKey, entity);
     }
 
@@ -2351,8 +2359,18 @@ function createRemoteChannelManager(deps = {}) {
   }
 
   async function runQueueOnce() {
-    const staleBefore = new Date(Date.now() - staleLockMs).toISOString();
-    releaseStaleRemoteChannelQueueItems(staleBefore);
+    // Only release stale locks once per minute to avoid a DB write on every
+    // queue tick (which fires as often as every second).
+    const now = Date.now();
+    const staleReleaseIntervalMs = Math.max(60_000, staleLockMs / 5);
+    if (
+      !runQueueOnce._lastStaleReleaseAt ||
+      now - runQueueOnce._lastStaleReleaseAt >= staleReleaseIntervalMs
+    ) {
+      const staleBefore = new Date(now - staleLockMs).toISOString();
+      releaseStaleRemoteChannelQueueItems(staleBefore);
+      runQueueOnce._lastStaleReleaseAt = now;
+    }
 
     // Claim the full batch up-front, then process items concurrently across
     // different sources. Items from the same source are processed sequentially

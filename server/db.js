@@ -1058,6 +1058,20 @@ export function markRemoteChannelQueueItemRetry(id, payload = {}) {
   );
 }
 
+/**
+ * Delete completed (done/skipped/failed) queue rows older than the given ISO
+ * timestamp. Prevents the remote_channel_queue table from growing unboundedly.
+ */
+export function purgeOldRemoteChannelQueueItems(olderThanIso) {
+  return run(
+    `DELETE FROM remote_channel_queue
+     WHERE status IN ('done', 'skipped', 'failed')
+       AND processed_at IS NOT NULL
+       AND processed_at < ?`,
+    [String(olderThanIso)],
+  );
+}
+
 export function removeChatMember(chatId, userId) {
   run("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?", [
     Number(chatId),

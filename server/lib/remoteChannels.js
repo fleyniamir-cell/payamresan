@@ -1514,6 +1514,7 @@ function createRemoteChannelManager(deps = {}) {
   }
 
   async function pollTelegramOnce() {
+    const sources = listEnabledRemoteChannelSources("telegram");
     if (!sources.length) {
       await sleep(pollIntervalMs);
       return;

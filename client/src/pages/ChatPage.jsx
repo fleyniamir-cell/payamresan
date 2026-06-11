@@ -7,11 +7,12 @@ import { useAppContextMenu } from "../components/context-menu/useAppContextMenu.
 import { CHAT_PAGE_CONFIG } from "../settings/chatPageConfig.js";
 import { getAvatarInitials } from "../utils/avatarInitials.js";
 import { getRandomAvatarColor } from "../utils/avatarColor.js";
-import { NICKNAME_MAX, USERNAME_MAX } from "../utils/nameLimits.js";
+import { NICKNAME_MAX, USERNAME_MAX, USERNAME_REGEX } from "../utils/nameLimits.js";
 import { resolveReplyPreview, summarizeFiles, truncateText } from "../utils/messagePreview.js";
 import {
   formatBytesAsMb,
   formatChatCardTimestamp,
+  formatCompactCount,
   formatDayLabel,
   formatTime,
   parseServerDate,
@@ -336,6 +337,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileModalMember, setProfileModalMember] = useState(null);
   const [profileInviteLink, setProfileInviteLink] = useState("");
+  const [profileInviteLinkLoading, setProfileInviteLinkLoading] = useState(false);
+  const [profileRemoteChannelStatus, setProfileRemoteChannelStatus] = useState(null);
   const [mentionProfile, setMentionProfile] = useState(null);
   const [mentionRefreshToken, _setMentionRefreshToken] = useState(0);
   const [editingGroup, setEditingGroup] = useState(false);
@@ -403,6 +406,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const messageBlobUrlsRef = useRef(new Set());
   const [sseConnected, setSseConnected] = useState(false);
   const lazyChunksPreloadedRef = useRef(false);
+  const [showFloatingLabel, setShowFloatingLabel] = useState(false);
 
   useEffect(() => {
     setReplyTarget(null);
@@ -411,6 +415,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setPendingDeleteMessage(null);
     setForwardMessageTarget(null);
     setForwardSavedChat(null);
+    setShowFloatingLabel(false);
   }, [activeChatId]);
 
   useEffect(() => {
@@ -521,7 +526,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const {
     notificationsModalOpen,
     setNotificationsModalOpen,
-    testNotificationSent,
     notificationsEnabled,
     notificationPermission,
     notificationsSupported,
@@ -529,8 +533,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     notificationsDisabled,
     notificationStatusLabel,
     notificationsDebugLine,
+    messagePreviewEnabled,
     handleToggleNotifications,
-    handleTestPush,
+    handleToggleMessagePreview,
   } = useChatNotifications({
     user,
     settingsPanel,
@@ -780,6 +785,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   );
   const [isUpdatingChats, setIsUpdatingChats] = useState(false);
   const [sidebarScrollEpoch, setSidebarScrollEpoch] = useState(0);
+  const [chatsScrollToTopEpoch, setChatsScrollToTopEpoch] = useState(0);
   const [activePeer, setActivePeer] = useState(null);
   const [peerPresence, setPeerPresence] = useState({
     status: "offline",
@@ -1318,6 +1324,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setChats,
     unreadMarkerIdRef,
     openingChatRef,
+    setShowFloatingLabel
   });
 
   /**
@@ -1528,11 +1535,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         sum + (chat?._muted ? 0 : Number(chat?.unread_count || 0)),
       0,
     );
-    const totalUnread = totalUnreadCount > 999 ? "+999" : totalUnreadCount;
+    const totalUnread = totalUnreadCount > 0 ? formatCompactCount(totalUnreadCount) : 0;
 
     document.title =
       totalUnreadCount > 0
-        ? `Songbird | ${totalUnread} new message${totalUnread === 1 ? "" : "s"}`
+        ? `Songbird | ${totalUnread} new message${totalUnreadCount === 1 ? "" : "s"}`
         : "Songbird";
     if (navigator?.setAppBadge) {
       if (totalUnreadCount > 0) {
@@ -2054,6 +2061,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       status,
       lastSeen: normalizedLastSeen,
     });
+    // Evict oldest entries when the map exceeds a reasonable size to prevent
+    // unbounded growth in large communities across long sessions.
+    if (presenceStateRef.current.size > 500) {
+      presenceStateRef.current.delete(presenceStateRef.current.keys().next().value);
+    }
     setChats((prev) =>
       prev.map((chat) => {
         const members = Array.isArray(chat?.members) ? chat.members : [];
@@ -2904,6 +2916,17 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     }, MOBILE_CLOSE_ANIMATION_MS);
   };
 
+  // Deselect active chat on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && activeChatId) {
+        closeChat();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [activeChatId]);
+
   useEffect(() => {
     if (!activeHeaderPeer?.username) return;
     let isMounted = true;
@@ -3004,9 +3027,10 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   useEffect(() => {
     const interval = setInterval(() => {
-      let changed = false;
-      setChats((prev) =>
-        prev.map((chat) => {
+      // Only rebuild chats state if at least one member status actually changed.
+      setChats((prev) => {
+        let anyChanged = false;
+        const next = prev.map((chat) => {
           if (!Array.isArray(chat?.members) || chat.members.length === 0) return chat;
           let chatChanged = false;
           const nextMembers = chat.members.map((member) => {
@@ -3020,10 +3044,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             return { ...member, status: nextStatus };
           });
           if (!chatChanged) return chat;
-          changed = true;
+          anyChanged = true;
           return { ...chat, members: nextMembers };
-        }),
-      );
+        });
+        return anyChanged ? next : prev;
+      });
 
       if (activeHeaderPeer?.username) {
         const snapshot = presenceStateRef.current.get(
@@ -3041,10 +3066,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             return { status: nextStatus, lastSeen: snapshot.lastSeen || null };
           });
         }
-      }
-
-      if (!changed) {
-        // no-op: we still refresh peerPresence above
       }
     }, 1500);
 
@@ -3487,11 +3508,13 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           : derivedSummary && isGenericBody
             ? derivedSummary
             : messageBody;
-        const body = baseBody
+      const body = messagePreviewEnabled
+        ? baseBody
           ? truncateText(baseBody, NOTIFICATION_PREVIEW_MAX_CHARS)
           : senderName
             ? `New message from ${senderName}.`
-            : "New message.";
+            : "New message"
+        : "New message.";
       try {
         const notification = new Notification(title, {
           body,
@@ -4104,6 +4127,15 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   useEffect(() => {
     if (!activeChatId) return;
+    // Only start the timeout-checker interval when there are actually pending
+    // messages. This avoids a 1-second setMessages call when the queue is idle.
+    const hasPending = messages.some(
+      (msg) =>
+        msg._delivery === "sending" &&
+        !msg._awaitingServerEcho &&
+        !Number(msg?._serverId || 0),
+    );
+    if (!hasPending) return;
     const interval = setInterval(() => {
       setMessages((prev) => {
         const now = Date.now();
@@ -4129,7 +4161,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       });
     }, CHAT_PAGE_CONFIG.pendingStatusCheckIntervalMs);
     return () => clearInterval(interval);
-  }, [activeChatId]);
+  }, [activeChatId, messages]);
 
   useEffect(() => {
     if (!activeChatId || !isAppActive) return;
@@ -5255,7 +5287,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       setProfileError("Username must be at least 3 characters.");
       return;
     }
-    if (!usernamePattern.test(trimmedUsername)) {
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
       setProfileError(
         "Username can only include english letters, numbers, dot (.), and underscore (_).",
       );
@@ -5434,7 +5466,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       visibility: "public",
       allowMemberInvites: true,
       remoteChannelEnabled: false,
-      remoteChannelProvider: "telegram",
+      remoteChannelProvider: appInfo?.remoteChannels?.telegramConfigured ? "telegram" : "songbird",
       remoteChannelSource: "",
       remoteChannelSyncMetadata: false,
       remoteChannelStreamMedia: false,
@@ -5472,18 +5504,30 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
   const openActiveChatProfile = async () => {
     if (!activeChat) return;
     setProfileModalMember(null);
+    setProfileInviteLinkLoading(false);
+    // Clear cached remote channel status when switching to a different chat
+    setProfileRemoteChannelStatus((prev) => {
+      const prevChatId = prev?._chatId;
+      return prevChatId && Number(prevChatId) !== Number(activeChat.id) ? null : prev;
+    });
     setProfileModalOpen(true);
     if (activeChat.type === "group" || activeChat.type === "channel") {
-      try {
-        const res = await getGroupInviteLink(activeChat.id);
-        const data = await res.json();
-        if (res.ok) {
-          setProfileInviteLink(String(data?.inviteLink || ""));
-        } else {
+      // Build invite link from already-available chat data — no round-trip needed
+      const localLink = buildInviteLinkForChat(activeChat);
+      if (localLink) {
+        setProfileInviteLink(localLink);
+      } else {
+        // Fallback: fetch from server if token is somehow missing locally
+        setProfileInviteLinkLoading(true);
+        try {
+          const res = await getGroupInviteLink(activeChat.id);
+          const data = await res.json();
+          setProfileInviteLink(res.ok ? String(data?.inviteLink || "") : "");
+        } catch {
           setProfileInviteLink("");
+        } finally {
+          setProfileInviteLinkLoading(false);
         }
-      } catch {
-        setProfileInviteLink("");
       }
     } else {
       setProfileInviteLink("");
@@ -5577,8 +5621,13 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setProfileModalOpen(false);
     setProfileModalMember(null);
     setProfileInviteLink("");
+    setProfileInviteLinkLoading(false);
     setMentionProfile(null);
   };
+
+  const handleProfileRemoteChannelStatusChange = useCallback((status) => {
+    setProfileRemoteChannelStatus(status ? { ...status, _chatId: activeChat?.id } : null);
+  }, [activeChat?.id]);
 
   const openSelfProfileEditor = () => {
     closeProfileModal();
@@ -5630,7 +5679,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       visibility: activeChat.group_visibility || "public",
       allowMemberInvites: Boolean(Number(activeChat.allow_member_invites || 0)),
       remoteChannelEnabled: false,
-      remoteChannelProvider: "telegram",
+      remoteChannelProvider: appInfo?.remoteChannels?.telegramConfigured ? "telegram" : "songbird",
       remoteChannelSource: "",
       remoteChannelSyncMetadata: false,
       remoteChannelStreamMedia: false,
@@ -5670,7 +5719,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           setNewGroupForm((prev) => ({
             ...prev,
             remoteChannelEnabled: Boolean(source?.enabled),
-            remoteChannelProvider: source?.provider || "telegram",
+            remoteChannelProvider: source?.provider || "songbird",
             remoteChannelSource:
               source?.sourceRaw ||
               (source?.sourceUsername ? `@${source.sourceUsername}` : "") ||
@@ -5796,7 +5845,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       setNewGroupError(`${label} username must be at least 3 characters.`);
       return;
     }
-    if (!usernamePattern.test(username)) {
+    if (!USERNAME_REGEX.test(username)) {
       setNewGroupError(
         `${label} username can only include english letters, numbers, dot (.), and underscore (_).`,
       );
@@ -5809,7 +5858,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       newGroupForm.visibility !== "private" &&
       Boolean(newGroupForm.remoteChannelEnabled);
     const remoteChannelProvider = String(
-      newGroupForm.remoteChannelProvider || "telegram",
+      newGroupForm.remoteChannelProvider || "songbird",
     ).toLowerCase();
     const remoteChannelSyncMetadata =
       remoteChannelEnabled && Boolean(newGroupForm.remoteChannelSyncMetadata);
@@ -5828,6 +5877,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       : null;
     const originalEnabled =
       Boolean(originalRemoteChannel?.enabled);
+    const originalProvider = String(originalRemoteChannel?.provider || "telegram").toLowerCase();
     const originalSource =
       originalRemoteChannel?.sourceRaw ||
       (originalRemoteChannel?.sourceUsername
@@ -5841,6 +5891,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
       Boolean(originalRemoteChannel?.streamMedia);
     const remoteChannelChanged =
       remoteChannelEnabled !== originalEnabled ||
+      remoteChannelProvider !== originalProvider ||
       remoteChannelSource !== originalSource ||
       remoteChannelSyncMetadata !== originalSyncMetadata ||
       remoteChannelStreamMedia !== originalStreamMedia;
@@ -6247,7 +6298,6 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
     setUserScrolledUp,
     userScrolledUpRef,
   ]);
-  const usernamePattern = /^[a-z0-9._]+$/;
   const shouldPromptNotifications =
     notificationsSupported &&
     notificationPermission === "default" &&
@@ -6314,6 +6364,7 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         isConnected={isConnected}
         isUpdating={isUpdatingChats}
         scrollEpoch={sidebarScrollEpoch}
+        chatsScrollToTopEpoch={chatsScrollToTopEpoch}
         editMode={editMode}
         visibleChats={visibleChats}
         selectedChats={selectedChats}
@@ -6388,8 +6439,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
         notificationStatusLabel={notificationStatusLabel}
         onToggleNotifications={handleToggleNotifications}
         onOpenNotifications={() => setNotificationsModalOpen(true)}
-        onTestPush={handleTestPush}
-        testNotificationSent={testNotificationSent}
+        messagePreviewEnabled={messagePreviewEnabled}
+        onToggleMessagePreview={handleToggleMessagePreview}
         notificationsDebugLine={notificationsDebugLine}
         onOpenSavedMessages={openSavedMessages}
         onClearCache={handleClearCache}
@@ -6506,14 +6557,19 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
           onDismiss: (mode) =>
             dismissPermissionsPrompt(mode || activePermissionPrompt),
         }}
+        showFloatingLabel={showFloatingLabel}
       />
 
       <MobileTabMenu
         hidden={mobileTab === "chat" && activeChatId}
         mobileTab={mobileTab}
         onChats={() => {
-          setMobileTab("chats");
-          setSettingsPanel(null);
+          if (mobileTab === "chats") {
+            setChatsScrollToTopEpoch((prev) => prev + 1);
+          } else {
+            setMobileTab("chats");
+            setSettingsPanel(null);
+          }
         }}
         onSettings={() => setMobileTab("settings")}
       />
@@ -6657,6 +6713,12 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
               appInfo?.remoteChannels?.enabled &&
               appInfo?.remoteChannels?.uiEnabled
             )}
+            remoteChannelTelegramAvailable={Boolean(
+              appInfo?.remoteChannels?.telegramConfigured
+            )}
+            remoteChannelSongbirdAvailable={Boolean(
+              appInfo?.remoteChannels?.songbirdConfigured
+            )}
             remoteChannelMediaStreamAllowed={Boolean(
               appInfo?.remoteChannels?.mediaStreamEnabled
             )}
@@ -6692,6 +6754,9 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             currentUser={user}
             muted={activeChatMuted}
             inviteLink={profileInviteLink}
+            inviteLinkLoading={profileInviteLinkLoading}
+            initialRemoteChannelStatus={profileRemoteChannelStatus}
+            onRemoteChannelStatusChange={handleProfileRemoteChannelStatusChange}
             canViewInvite={canCurrentUserViewInvite}
             readOnly={Boolean(
               isMentionProfileReadOnly ||
@@ -6732,9 +6797,8 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
             notificationsDisabled={notificationsDisabled}
             notificationStatusLabel={notificationStatusLabel}
             onToggleNotifications={handleToggleNotifications}
-            onTestPush={handleTestPush}
-            testNotificationSent={testNotificationSent}
-            notificationsEnabled={notificationsEnabled}
+            messagePreviewEnabled={messagePreviewEnabled}
+            onToggleMessagePreview={handleToggleMessagePreview}
             debugLine={notificationsDebugLine}
           />
         </Suspense>

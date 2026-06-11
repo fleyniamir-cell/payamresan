@@ -464,13 +464,14 @@ nano .env
 | `REMOTE_CHANNEL_TELEGRAM_API_ID` | `integer` | `0` | Telegram API ID. |
 | `REMOTE_CHANNEL_TELEGRAM_API_HASH` | `string` | `""` | Telegram API hash. |
 | `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` | `string` | `""` | Telegram StringSession. Treat it like a password. |
-| `REMOTE_CHANNEL_PROXY_URL` | `string` | `""` | Telegram MTProto proxy URL. |
-| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `integer` | `5000` | How often the Telegram poller checks enabled Remote Channel sources. |
+| `REMOTE_CHANNEL_TELEGRAM_PROXY_URL` | `string` | `""` | Telegram MTProto proxy URL. (`REMOTE_CHANNEL_PROXY_URL` is supported as a legacy fallback.) |
+| `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` | `string` | `""` | HTTP/HTTPS proxy for outbound requests from this server to remote Songbird servers. |
+| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `integer` | `5000` | How often the poller checks enabled Remote Channel sources. |
 | `REMOTE_CHANNEL_TELEGRAM_POLL_LIMIT` | `integer` | `50` | Max Telegram posts fetched per poll for each source (`1`-`100`). |
-| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `integer` | `1000` | How often the mirror queue worker processes pending Telegram posts. |
+| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `integer` | `1000` | How often the mirror queue worker processes pending remote posts. |
 | `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `integer` | `10` | Max retry attempts before a queued remote post is marked failed. |
 | `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `integer` | `10` | Max queued remote posts processed per worker tick (`1`-`50`). |
-| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `integer` | `3` | How many queued items are processed concurrently per worker tick. Also controls how many Telegram sources are polled in parallel. |
+| `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `integer` | `3` | How many queued items are processed concurrently per worker tick. Also controls how many sources are polled in parallel. |
 | `REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS` | `integer` | `300000` | Age after which an in-progress queue lock is considered stale and can be retried. |
 | `CHAT_PENDING_TEXT_TIMEOUT` | `integer` | `300000` | Mark pending text message as failed after this timeout (milliseconds). |
 | `CHAT_PENDING_FILE_TIMEOUT` | `integer` | `1200000` | Mark pending file message as failed / XHR timeout for uploads (milliseconds). |
@@ -545,16 +546,31 @@ sudo systemctl reload nginx
 
 ## Remote Channel Setup
 
-Remote Channel lets a public Songbird channel mirror posts from a Telegram channel. The server polls Telegram, queues new posts, creates Songbird messages as the channel owner, and keeps retry state in the database. Only channel owners can configure a channel source.
+Remote Channel lets a public Songbird channel mirror posts from a Telegram channel or another public Songbird channel. Only channel owners can configure a channel source, and only one source can be active per channel at a time.
 
-On first enable, Songbird initializes the source at the latest Telegram post and does not import channel history. Posts published after that point are mirrored.
+On first enable, Songbird initializes the source at the latest post and does not import history. Posts published after that point are mirrored.
+
+### Songbird source
+
+To mirror from another Songbird server, create or edit a **public channel**, enable **Remote Channel**, choose **Songbird**, and paste the public channel invite link from the target server (e.g. `https://other.server/invite/channelname`).
+
+**Requirements:**
+- The target server must have `SIGN_UP=true` (public server).
+- The target channel must be public.
+- The target server must be running the same or a newer version of Songbird that includes the public channel polling endpoints.
+
+No extra credentials are needed. Set `REMOTE_CHANNEL=true` on this server and optionally `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` if your server needs a proxy to reach the target.
+
+### Telegram source
+
+To mirror from a Telegram channel, Telegram API credentials are required.
 
 ### 1. Create Telegram credentials
 
 Create a [Telegram app](https://my.telegram.org/apps) so you have an API ID and API hash ready. If your server needs a proxy to reach Telegram, have that URL ready too. Supported schemes are `http://`, `https://`, `socks4://`, `socks5://`, and `mtproxy://`.
 
 > [!WARNING]
-> I strongly suggest to not use your main personal Telegram account for this.
+> It is recommended to not use your main personal Telegram account for this.
 
 ### 2. Configure Remote Channel
 
@@ -901,12 +917,6 @@ If you like this project which I hope you do, consider supporting your favorite 
 
 ```
 TPf1bEhipKpGkjo5N2Scj9nufNNh5TNrwX
-```
-
-### USDT (TRC20):
-
-```
-0x63313383611BbE11f4fEc139c14ad0b70281b822
 ```
 
 ### BTC:

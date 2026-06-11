@@ -5,21 +5,11 @@
       "@semantic-release/commit-analyzer",
       {
         "releaseRules": [
-          { "message": "*\\[major release\\]*", "release": "major" },
-          { "message": "*\\[minor release\\]*", "release": "minor" },
-          { "message": "*\\[patch release\\]*", "release": "patch" },
-          { "type": "feat", "release": false },
-          { "type": "fix", "release": false },
-          { "type": "perf", "release": false },
-          { "type": "hotfix", "release": false },
-          { "type": "refactor", "release": false },
-          { "type": "docs", "release": false },
-          { "type": "style", "release": false },
-          { "type": "test", "release": false },
-          { "type": "chore", "release": false },
-          { "type": "build", "release": false },
-          { "type": "ci", "release": false },
-          { "type": "revert", "release": false }
+          { "subject": "*\\[major release\\]*", "release": "major" },
+          { "subject": "*\\[minor release\\]*", "release": "minor" },
+          { "subject": "*\\[patch release\\]*", "release": "patch" },
+          { "type": "*", "release": false },
+          { "subject": "*", "release": false }
         ]
       }
     ],

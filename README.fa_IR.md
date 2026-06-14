@@ -34,25 +34,25 @@ songbird-deploy
 
 ## مستندات
 
-مستندات کامل در [ویکی Songbird](https://github.com/bllackbull/Songbird/wiki) قرار دارد (به زبان انگلیسی):
+مستندات کامل در [docs.songbird.website](https://docs.songbird.website/fa/) قرار دارد:
 
-- [اسکریپت نصب آسان](https://github.com/bllackbull/Songbird/wiki/Deployment-Script)
-- [نصب از طریق Docker](https://github.com/bllackbull/Songbird/wiki/Installation-Docker)
-- [نصب دستی](https://github.com/bllackbull/Songbird/wiki/Manual-Installation)
-- [کانفیگ Nginx](https://github.com/bllackbull/Songbird/wiki/Nginx-Configuration)
-- [گواهی‌های SSL](https://github.com/bllackbull/Songbird/wiki/SSL-Certificates)
-- [متغیرهای محیطی](https://github.com/bllackbull/Songbird/wiki/Environment-Variables)
-- [راه‌اندازی Remote Channel](https://github.com/bllackbull/Songbird/wiki/Remote-Channel-Setup)
-- [پراکسی Push Notification](https://github.com/bllackbull/Songbird/wiki/Push-Notification-Proxy)
-- [به‌روزرسانی برنامه](https://github.com/bllackbull/Songbird/wiki/Updating)
-- [دستورات دیتابیس](https://github.com/bllackbull/Songbird/wiki/Database-Commands)
-- [اجرا روی دامنه + subpath](https://github.com/bllackbull/Songbird/wiki/Subpath-Hosting)
-- [عیب‌یابی](https://github.com/bllackbull/Songbird/wiki/Troubleshooting)
+- [اسکریپت نصب](https://docs.songbird.website/fa/Deployment-Script)
+- [نصب از طریق Docker](https://docs.songbird.website/fa/Installation-Docker)
+- [نصب دستی](https://docs.songbird.website/fa/Manual-Installation)
+- [کانفیگ Nginx](https://docs.songbird.website/fa/Nginx-Configuration)
+- [گواهی‌های SSL](https://docs.songbird.website/fa/SSL-Certificates)
+- [متغیرهای محیطی](https://docs.songbird.website/fa/Environment-Variables)
+- [راه‌اندازی Remote Channel](https://docs.songbird.website/fa/Remote-Channel-Setup)
+- [پراکسی Push Notification](https://docs.songbird.website/fa/Push-Notification-Proxy)
+- [به‌روزرسانی برنامه](https://docs.songbird.website/fa/Updating)
+- [دستورات دیتابیس](https://docs.songbird.website/fa/Database-Commands)
+- [اجرا روی دامنه + subpath](https://docs.songbird.website/fa/Subpath-Hosting)
+- [عیب‌یابی](https://docs.songbird.website/fa/Troubleshooting)
 
 ## نویسنده
 
 - سازنده: [@bllackbull](https://github.com/bllackbull)
-- مشارکت کنندگان: [@nkhalili](https://github.com/nkhalili)
+- مشارکت کنندگان: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos)
 
 ## مشارکت
 

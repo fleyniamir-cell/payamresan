@@ -34,25 +34,25 @@ songbird-deploy
 
 ## Documentation
 
-Full documentation lives in the [Songbird Wiki](https://github.com/bllackbull/Songbird/wiki):
+Full documentation lives at [docs.songbird.website](https://docs.songbird.website):
 
-- [Deployment Script](https://github.com/bllackbull/Songbird/wiki/Deployment-Script)
-- [Install via Docker](https://github.com/bllackbull/Songbird/wiki/Installation-Docker)
-- [Manual Installation](https://github.com/bllackbull/Songbird/wiki/Manual-Installation)
-- [Configure Nginx](https://github.com/bllackbull/Songbird/wiki/Nginx-Configuration)
-- [SSL Certificates](https://github.com/bllackbull/Songbird/wiki/SSL-Certificates)
-- [Environment Variables](https://github.com/bllackbull/Songbird/wiki/Environment-Variables)
-- [Remote Channel Setup](https://github.com/bllackbull/Songbird/wiki/Remote-Channel-Setup)
-- [Push Notification Proxy](https://github.com/bllackbull/Songbird/wiki/Push-Notification-Proxy)
-- [Updating the deployed app](https://github.com/bllackbull/Songbird/wiki/Updating)
-- [Database Commands](https://github.com/bllackbull/Songbird/wiki/Database-Commands)
-- [Running behind a domain + subpath](https://github.com/bllackbull/Songbird/wiki/Subpath-Hosting)
-- [Troubleshooting](https://github.com/bllackbull/Songbird/wiki/Troubleshooting)
+- [Deployment Script](https://docs.songbird.website/Deployment-Script)
+- [Install via Docker](https://docs.songbird.website/Installation-Docker)
+- [Manual Installation](https://docs.songbird.website/Manual-Installation)
+- [Configure Nginx](https://docs.songbird.website/Nginx-Configuration)
+- [SSL Certificates](https://docs.songbird.website/SSL-Certificates)
+- [Environment Variables](https://docs.songbird.website/Environment-Variables)
+- [Remote Channel Setup](https://docs.songbird.website/Remote-Channel-Setup)
+- [Push Notification Proxy](https://docs.songbird.website/Push-Notification-Proxy)
+- [Updating the deployed app](https://docs.songbird.website/Updating)
+- [Database Commands](https://docs.songbird.website/Database-Commands)
+- [Running behind a domain + subpath](https://docs.songbird.website/Subpath-Hosting)
+- [Troubleshooting](https://docs.songbird.website/Troubleshooting)
 
 ## Author
 
 - Maintainer: [@bllackbull](https://github.com/bllackbull)
-- Contributors: [@nkhalili](https://github.com/nkhalili)
+- Contributors: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos)
 
 ## Contributing
 

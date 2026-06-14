@@ -2,8 +2,11 @@
 
 By default Songbird is served from the root of a domain (e.g. `https://chat.example.com/`). If you instead want to host it under a subpath (e.g. `https://example.com/songbird/`), you need to align three things: the Vite build `base`, the client asset references, and the Nginx location block.
 
-> [!IMPORTANT]
-> Root-domain hosting is the supported default and needs none of the steps below. Only follow this page if you specifically need a subpath.
+:::info
+
+Root-domain hosting is the supported default and needs none of the steps below. Only follow this page if you specifically need a subpath.
+
+:::
 
 ## Overview
 
@@ -41,7 +44,7 @@ npm run build
 
 ## 3. Add the Nginx location block
 
-Proxy the subpath to the Node server. The SSE endpoint still needs its own buffering-disabled block. Adapt the [base Nginx config](Nginx-Configuration) like this:
+Proxy the subpath to the Node server. The SSE endpoint still needs its own buffering-disabled block. Adapt the [base Nginx config](./Nginx-Configuration.md) like this:
 
 ```nginx
 location /songbird/api/events {
@@ -78,5 +81,8 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-> [!NOTE]
-> The trailing slash on `proxy_pass http://127.0.0.1:5174/;` strips the `/songbird/` prefix before forwarding to the Node server. Keep the `base` in Vite and the `location` prefix in Nginx in sync; a mismatch is the most common cause of broken assets or blank pages on subpath setups.
+:::info
+
+The trailing slash on `proxy_pass http://127.0.0.1:5174/;` strips the `/songbird/` prefix before forwarding to the Node server. Keep the `base` in Vite and the `location` prefix in Nginx in sync; a mismatch is the most common cause of broken assets or blank pages on subpath setups.
+
+:::

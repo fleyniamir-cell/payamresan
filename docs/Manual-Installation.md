@@ -50,13 +50,16 @@ cd /opt/songbird
 git clone https://github.com/bllackbull/Songbird.git .
 ```
 
-> [!NOTE]
-> If you installed Node.js using nvm:
->
-> ```bash
-> nvm install
-> nvm use
-> ```
+:::info
+
+If you installed Node.js using nvm:
+
+```bash
+nvm install
+nvm use
+```
+
+:::
 
 ## 3. Install dependencies
 
@@ -89,23 +92,29 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-> [!IMPORTANT]
-> - If you installed Node.js using nvm, set this as Node path in `ExecStart`:
->
-> ```ini
-> ExecStart=/root/.nvm/versions/node/v24.11.1/bin/node index.js
-> ```
->
-> - If you installed Node.js using volta, set this as Node path in `ExecStart`:
->
-> ```ini
-> ExecStart=/root/.volta/bin/node index.js
-> ```
+:::info
+
+- If you installed Node.js using nvm, set this as Node path in `ExecStart`:
+
+```ini
+ExecStart=/root/.nvm/versions/node/v24.11.1/bin/node index.js
+```
+
+- If you installed Node.js using volta, set this as Node path in `ExecStart`:
+
+```ini
+ExecStart=/root/.volta/bin/node index.js
+```
+
+:::
 
 **Recommended: Create a dedicated user:**
 
-> [!WARNING]
-> Skip this step if you installed Node.js using nvm or volta.
+:::warning
+
+Skip this step if you installed Node.js using nvm or volta.
+
+:::
 
 Due to security concerns, it is recommended to create a dedicated system user and change ownership of the project directory:
 

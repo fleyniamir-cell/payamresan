@@ -27,4 +27,4 @@ This works for both domain and IP setups as long as your certificate covers what
 
 ## Option C: Use the deploy script
 
-The [Deployment Script](Deployment-Script) (`songbird-deploy`) can configure Nginx for you and also handle SSL setup. That is the easiest path if you do not want to manage the Nginx and certificate steps manually.
+The [Deployment Script](./Deployment-Script.md) (`songbird-deploy`) can configure Nginx for you and also handle SSL setup. That is the easiest path if you do not want to manage the Nginx and certificate steps manually.

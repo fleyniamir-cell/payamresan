@@ -8,18 +8,24 @@ How you update depends on how you installed Songbird.
 | Docker | `git pull` + `docker compose up -d --build`. |
 | Manual (systemd) | `git pull` + rebuild client/server + restart service. |
 
-> [!WARNING]
-> Backup your database before updating:
->
-> ```bash
-> cd /opt/songbird/server
-> npm run db:backup
-> # Or use this for Docker:
-> docker compose exec songbird npm --prefix /app/server run db:backup
-> ```
+:::warning
 
-> [!TIP]
-> The [Deployment Script](Deployment-Script) can update your app for you and will offer to back up your database first.
+Backup your database before updating:
+
+```bash
+cd /opt/songbird/server
+npm run db:backup
+# Or use this for Docker:
+docker compose exec songbird npm --prefix /app/server run db:backup
+```
+
+:::
+
+:::tip
+
+The [Deployment Script](./Deployment-Script.md) can update your app for you and will offer to back up your database first.
+
+:::
 
 ## Docker + Compose
 
@@ -44,5 +50,8 @@ sudo systemctl restart songbird
 sudo systemctl reload nginx
 ```
 
-> [!NOTE]
-> For zero-downtime deployments on larger projects, consider blue-green deployment or PM2, but for most updates the restart approach above is simple and sufficient.
+:::info
+
+For zero-downtime deployments on larger projects, consider blue-green deployment or PM2, but for most updates the restart approach above is simple and sufficient.
+
+:::

@@ -6,8 +6,11 @@ Songbird ships a set of `npm` scripts for managing the database, users, chats, f
 cd /opt/songbird/server
 ```
 
-> [!TIP]
-> You can also run every database command interactively via the [Deployment Script](Deployment-Script) (`songbird-deploy`).
+:::tip
+
+You can also run every database command interactively via the [Deployment Script](./Deployment-Script.md) (`songbird-deploy`).
+
+:::
 
 ## Conventions
 
@@ -65,8 +68,11 @@ Creates `data/backups/songbird-backup-<timestamp>.zip` containing `.env` and the
 npm run db:backup -- --password "backup-password"
 ```
 
-> [!NOTE]
-> Requires the `zip` binary. Override it with the `ZIP_BIN` environment variable if needed.
+:::info
+
+Requires the `zip` binary. Override it with the `ZIP_BIN` environment variable if needed.
+
+:::
 
 ### `db:restore`
 
@@ -93,8 +99,11 @@ songbird-backup-YYYY-MM-DDTHH-MM-SS-sssZ.zip
    `- uploads/
 ```
 
-> [!NOTE]
-> Legacy backups with `songbird.db` and `uploads/` at the zip root are also accepted.
+:::info
+
+Legacy backups with `songbird.db` and `uploads/` at the zip root are also accepted.
+
+:::
 
 ---
 

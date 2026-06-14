@@ -12,8 +12,11 @@ This page collects common issues and how to diagnose them. Start by checking the
 | Nginx access log | `sudo tail -f /var/log/nginx/access.log` | Confirm requests reach the server and their status codes. |
 | Deploy script log | `cat /opt/songbird/logs/install.log` | Failures during install/update via `songbird-deploy`. |
 
-> [!TIP]
-> The [deployment script](Deployment-Script) has a built-in **View Logs** menu that opens all of these without typing paths.
+:::tip
+
+The [deployment script](./Deployment-Script.md) has a built-in **View Logs** menu that opens all of these without typing paths.
+
+:::
 
 ## Symptom quick reference
 
@@ -50,7 +53,7 @@ To work around the restriction, point the package tooling at reachable mirrors o
 | npm | Use an alternate npm registry mirror. |
 | Docker / general outbound | Configure an HTTP/HTTPS proxy for the shell or Docker daemon. |
 
-If you install with the [Deployment Script](Deployment-Script), use its **Configure mirrors** menu to set NodeSource, apt, and npm mirrors before installing. That page also lists working mirror examples (including ones usable inside Iran's restricted environment). See [Mirrors for restricted networks](Deployment-Script#mirrors-for-restricted-networks).
+If you install with the [Deployment Script](./Deployment-Script.md), use its **Configure mirrors** menu to set NodeSource, apt, and npm mirrors before installing. That page also lists working mirror examples (including ones usable inside Iran's restricted environment). See [Mirrors for restricted networks](./Deployment-Script.md#mirrors-for-restricted-networks).
 
 For manual or Docker installs, set a proxy in your shell before running the install commands:
 
@@ -86,15 +89,21 @@ sudo systemctl restart systemd-resolved
 
 Then re-test with `dig +short github.com`. Once DNS resolves correctly, retry the installation or the failed operation.
 
-> [!NOTE]
-> Choose DNS resolvers that are reachable and not blocked from your server's network. In restricted environments a public resolver may itself be filtered, in which case combine this with the mirror/proxy workarounds above.
+:::info
 
-> [!TIP]
-> You can use these DNS resolvers in Iran's restricted environment:
-> ```
-> 217.218.127.127
-> 217.218.155.155
-> ```
+Choose DNS resolvers that are reachable and not blocked from your server's network. In restricted environments a public resolver may itself be filtered, in which case combine this with the mirror/proxy workarounds above.
+
+:::
+
+:::tip
+
+You can use these DNS resolvers in Iran's restricted environment:
+```
+217.218.127.127
+217.218.155.155
+```
+
+:::
 
 ---
 
@@ -127,7 +136,7 @@ sudo systemctl reload nginx
 
 Songbird uses Server-Sent Events (SSE) for live messages and presence. If messages only appear after a refresh, the SSE stream is likely being buffered by Nginx.
 
-- Ensure the `/api/events` location block is present and disables buffering (`proxy_buffering off;`, `add_header X-Accel-Buffering no;`). See [Configure Nginx](Nginx-Configuration).
+- Ensure the `/api/events` location block is present and disables buffering (`proxy_buffering off;`, `add_header X-Accel-Buffering no;`). See [Configure Nginx](./Nginx-Configuration.md).
 - Confirm any upstream proxy or CDN is not buffering or timing out the connection.
 - Check `proxy_read_timeout` / `proxy_send_timeout` are long enough (the sample config uses `1h`).
 
@@ -140,7 +149,7 @@ Songbird uses Server-Sent Events (SSE) for live messages and presence. If messag
 | iOS | Requires an installed PWA on iOS 16.4+. |
 | Network reachability | The server must reach push endpoints (FCM, Mozilla, Apple). |
 
-If logs show `[push] delivery failed ... status=0 ... AggregateError`, the server cannot reach the push services. Common causes: firewall blocking outbound HTTPS, DNS failures, or a network that requires a proxy. Configure a proxy via [Push Notification Proxy](Push-Notification-Proxy) and test connectivity:
+If logs show `[push] delivery failed ... status=0 ... AggregateError`, the server cannot reach the push services. Common causes: firewall blocking outbound HTTPS, DNS failures, or a network that requires a proxy. Configure a proxy via [Push Notification Proxy](./Push-Notification-Proxy.md) and test connectivity:
 
 ```bash
 curl -x http://your-proxy:3128 https://fcm.googleapis.com
@@ -157,7 +166,7 @@ curl -x http://your-proxy:3128 https://fcm.googleapis.com
 | Nginx rejects large bodies (`413`) | Set `client_max_body_size` to match `FILE_UPLOAD_MAX_TOTAL_SIZE_MB`. |
 | Disk full | Check free space with `npm run db:inspect` (reports disk usage) or `df -h`. |
 
-After changing `.env`, apply the changes (see [Environment Variables](Environment-Variables#apply-changes)).
+After changing `.env`, apply the changes (see [Environment Variables](./Environment-Variables.md#apply-changes)).
 
 ## Video transcoding issues
 
@@ -189,7 +198,7 @@ Other checks:
 | IP-based cert expired | The IP certificate flow uses short-lived (6-day) certs auto-renewed by a timer; confirm the `songbird-lego-renew` timer is active. |
 | Self-signed warning (Docker default) | Expected with the default self-signed cert. Replace with real certs for production. |
 
-See [SSL Certificates](SSL-Certificates) for the full setup options.
+See [SSL Certificates](./SSL-Certificates.md) for the full setup options.
 
 ## Remote Channel not mirroring
 
@@ -202,7 +211,7 @@ See [SSL Certificates](SSL-Certificates) for the full setup options.
 | Queue paused | Resume with `npm run db:chat:edit -- <channel> --resume-queue`. |
 | Proxy needed | If the server cannot reach Telegram, set a proxy (`REMOTE_CHANNEL_TELEGRAM_PROXY_URL`). |
 
-See [Remote Channel Setup](Remote-Channel-Setup) for the complete configuration guide.
+See [Remote Channel Setup](./Remote-Channel-Setup.md) for the complete configuration guide.
 
 ---
 

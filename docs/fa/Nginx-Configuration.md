@@ -1,20 +1,20 @@
-# Configure Nginx
+# پیکربندی Nginx
 
-Songbird serves both the built frontend and the API from the Node server, so Nginx only needs to proxy one upstream: `http://127.0.0.1:SERVER_PORT`.
+Songbird هم فرانت‌اند ساخته‌شده و هم API را از سرور Node ارائه می‌دهد، بنابراین Nginx تنها باید یک upstream را پراکسی کند: `http://127.0.0.1:SERVER_PORT`.
 
-Create `/etc/nginx/sites-available/songbird`:
+فایل `/etc/nginx/sites-available/songbird` را ایجاد کنید:
 
 :::info
 
-- Keep `proxy_pass` aligned with `SERVER_PORT`.
-- Keep the Nginx `listen` port aligned with `CLIENT_PORT`.
-- Keep `client_max_body_size` aligned with `FILE_UPLOAD_MAX_TOTAL_SIZE_MB`.
+- مقدار `proxy_pass` را با `SERVER_PORT` همسو نگه دارید.
+- پورت `listen` در Nginx را با `CLIENT_PORT` همسو نگه دارید.
+- مقدار `client_max_body_size` را با `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` همسو نگه دارید.
 
 :::
 
-## HTTP only
+## فقط HTTP
 
-Use this if you are not enabling SSL yet:
+اگر هنوز SSL را فعال نمی‌کنید از این استفاده کنید:
 
 ```nginx
 server {
@@ -50,7 +50,7 @@ server {
 }
 ```
 
-If you are using the server IP directly, replace `server_name example.com www.example.com;` with:
+اگر مستقیماً از IP سرور استفاده می‌کنید، `server_name example.com www.example.com;` را با این جایگزین کنید:
 
 ```nginx
 server_name _;
@@ -58,7 +58,7 @@ server_name _;
 
 ## HTTPS
 
-After you have certificate files, switch to this:
+پس از اینکه فایل‌های گواهی‌نامه را تهیه کردید، به این تغییر دهید:
 
 ```nginx
 server {
@@ -105,7 +105,7 @@ server {
 }
 ```
 
-Enable the site:
+سایت را فعال کنید:
 
 ```bash
 sudo ln -sf /etc/nginx/sites-available/songbird /etc/nginx/sites-enabled/songbird

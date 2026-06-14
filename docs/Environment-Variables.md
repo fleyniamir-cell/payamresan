@@ -1,7 +1,10 @@
 # Environment Variables
 
-> [!TIP]
-> You can easily edit your .env file via the [Deployment Script](Deployment-Script) and it would automatically apply and rebuild the app for you!
+:::tip
+
+You can easily edit your .env file via the [Deployment Script](./Deployment-Script.md) and it would automatically apply and rebuild the app for you!
+
+:::
 
 You can configure environment variables to customize app behavior.
 
@@ -66,11 +69,17 @@ nano .env
 | `VAPID_SUBJECT` | `string` | auto-generated | Contact for VAPID (email or URL). Used by push providers. |
 | `PUSH_PROXY_URL` | `string` | `""` | Proxy URL for push notification delivery. Use when your server cannot directly reach push service endpoints. |
 
-> [!NOTE]
-> **Push notifications require HTTPS** (except `localhost` for development). iOS requires an installed PWA (iOS 16.4+).
+:::info
 
-> [!IMPORTANT]
-> **Encryption at rest:** Songbird auto-generates `STORAGE_ENCRYPTION_KEY` on first run and saves it into `.env`. Keep that value stable. On startup, the server backfills existing stored messages, message-upload files, and avatar files into encrypted form when needed.
+**Push notifications require HTTPS** (except `localhost` for development). iOS requires an installed PWA (iOS 16.4+).
+
+:::
+
+:::info
+
+**Encryption at rest:** Songbird auto-generates `STORAGE_ENCRYPTION_KEY` on first run and saves it into `.env`. Keep that value stable. On startup, the server backfills existing stored messages, message-upload files, and avatar files into encrypted form when needed.
+
+:::
 
 ## Apply Changes
 

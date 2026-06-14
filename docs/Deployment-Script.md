@@ -2,8 +2,11 @@
 
 The deployment script (`songbird-deploy`) is the recommended way to install and manage Songbird. It is an interactive, menu-driven tool that handles dependencies, builds, Nginx, SSL certificates, environment configuration, database management, and updates, so you do not have to run those steps by hand.
 
-> [!NOTE]
-> The script targets Ubuntu (22.04+) and needs root privileges (it uses `sudo` automatically when not run as root). For Docker-based or fully manual setups, see [Install via Docker](Installation-Docker) and [Manual Installation](Manual-Installation).
+:::info
+
+The script targets Ubuntu (22.04+) and needs root privileges (it uses `sudo` automatically when not run as root). For Docker-based or fully manual setups, see [Install via Docker](./Installation-Docker.md) and [Manual Installation](./Manual-Installation.md).
+
+:::
 
 ## First run
 
@@ -60,8 +63,11 @@ When you choose **Install**, the script walks you through a series of prompts:
 | TLS certificate files | Use your own existing `fullchain.pem` and `privkey.pem`. |
 | HTTP only | Skip TLS and serve over plain HTTP. |
 
-> [!IMPORTANT]
-> HTTPS is required for push notifications (except on `localhost`). Choose a certificate mode other than HTTP only if you want push to work.
+:::info
+
+HTTPS is required for push notifications (except on `localhost`). Choose a certificate mode other than HTTP only if you want push to work.
+
+:::
 
 ### 4. Environment prompts
 
@@ -78,11 +84,11 @@ During install the script asks for the core settings and writes them into `.env`
 | Text-only message auto-deletion (days) | `MESSAGE_TEXT_RETENTION` | `0` |
 | Email for Let's Encrypt notices (certbot mode) | — | — |
 
-Encryption and push keys (`STORAGE_ENCRYPTION_KEY`, `VAPID_*`) are generated automatically. The full list of variables you can tune later lives in [Environment Variables](Environment-Variables).
+Encryption and push keys (`STORAGE_ENCRYPTION_KEY`, `VAPID_*`) are generated automatically. The full list of variables you can tune later lives in [Environment Variables](./Environment-Variables.md).
 
 ## Database submenu
 
-Option **5** opens a full database manager that wraps the [database commands](Database-Commands) with guided prompts, so you do not need to remember flags:
+Option **5** opens a full database manager that wraps the [database commands](./Database-Commands.md) with guided prompts, so you do not need to remember flags:
 
 | Group | Actions |
 |---|---|
@@ -95,7 +101,7 @@ Option **5** opens a full database manager that wraps the [database commands](Da
 
 ## Updating
 
-Choose **Update Songbird** from the menu. The script can create a database backup first, then pulls the latest version, rebuilds the client, and restarts the service. See [Updating](Updating) for the manual equivalent.
+Choose **Update Songbird** from the menu. The script can create a database backup first, then pulls the latest version, rebuilds the client, and restarts the service. See [Updating](./Updating.md) for the manual equivalent.
 
 ## Mirrors for restricted networks
 
@@ -109,20 +115,23 @@ If your server has limited access to default package sources, use **Configure mi
 
 You can also restore defaults (clear all mirrors) from the same menu.
 
-> [!TIP]
-> You can use these mirrors in Iran's restricted environment:
-> - NodeSource:
-> ```
-> https://mirror-nodejs.runflare.com/dist/v24.0.0/node-v24.0.0-linux-x64.tar.gz
-> ```
-> - APT:
-> ```
-> http://repo.iut.ac.ir/ubuntu/
-> ```
-> - NPM:
-> ```
-> https://npm.devneeds.ir/
-> ```
+:::tip
+
+You can use these mirrors in Iran's restricted environment:
+- NodeSource:
+```
+https://mirror-nodejs.runflare.com/dist/v24.0.0/node-v24.0.0-linux-x64.tar.gz
+```
+- APT:
+```
+http://repo.iut.ac.ir/ubuntu/
+```
+- NPM:
+```
+https://npm.devneeds.ir/
+```
+
+:::
 
 ## Logs
 
@@ -135,4 +144,4 @@ The **View Logs** submenu surfaces the most useful logs without remembering path
 | Nginx access logs | Nginx access log. |
 | Nginx error logs | Nginx error log. |
 
-For more on diagnosing problems, see [Troubleshooting](Troubleshooting).
+For more on diagnosing problems, see [Troubleshooting](./Troubleshooting.md).

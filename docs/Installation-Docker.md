@@ -82,6 +82,9 @@ docker compose -f docker-compose.yaml ps
 docker compose -f docker-compose.yaml logs -f
 ```
 
-> [!IMPORTANT]
-> Docker automatically configures the nginx config to run on port 443 using the self-signed cert you previously generated.
-> To change and customize the nginx config, refer to the [Configure Nginx](Nginx-Configuration) page.
+:::info
+
+Docker automatically configures the nginx config to run on port 443 using the self-signed cert you previously generated.
+To change and customize the nginx config, refer to the [Configure Nginx](./Nginx-Configuration.md) page.
+
+:::

@@ -34,8 +34,11 @@ To mirror from a Telegram channel, Telegram API credentials are required.
 
 Create a [Telegram app](https://my.telegram.org/apps) so you have an API ID and API hash ready. If your server needs a proxy to reach Telegram, have that URL ready too. Supported schemes are `http://`, `https://`, `socks4://`, `socks5://`, and `mtproxy://`.
 
-> [!WARNING]
-> It is recommended to not use your main personal Telegram account for this.
+:::warning
+
+It is recommended to not use your main personal Telegram account for this.
+
+:::
 
 ### 2. Configure Remote Channel
 
@@ -67,5 +70,8 @@ Optional channel settings:
 | Sync Channel Metadata | Copies the Telegram channel title/avatar into the Songbird channel. |
 | Stream Media Files | Downloads Telegram media into Songbird uploads when `FILE_UPLOAD=true`. Follows the upload size/count limits, file retention, encryption-at-rest, and video transcoding settings. Text-only mirrored posts follow `MESSAGE_TEXT_RETENTION`. |
 
-> [!NOTE]
-> Posts with no text/caption are mirrored only when media streaming is enabled and at least one supported media file can be stored.
+:::info
+
+Posts with no text/caption are mirrored only when media streaming is enabled and at least one supported media file can be stored.
+
+:::

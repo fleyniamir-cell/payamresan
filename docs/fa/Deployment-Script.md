@@ -65,7 +65,7 @@ songbird-deploy
 
 :::info
 
-HTTPS برای اعلان‌های فشاری موردنیاز است (به‌جز روی `localhost`). اگر می‌خواهید push کار کند، حالت گواهی‌نامه‌ای غیر از HTTP only را انتخاب کنید.
+HTTPS برای Push notifications موردنیاز است (به‌جز روی `localhost`). اگر می‌خواهید push کار کند، حالت گواهی‌نامه‌ای غیر از HTTP only را انتخاب کنید.
 
 :::
 

@@ -1,4 +1,4 @@
-# پراکسی اعلان فشاری
+# پراکسی Push notification
 
 اگر سرور شما به‌دلیل محدودیت‌های فایروال یا سیاست‌های شبکه نمی‌تواند به نقاط پایانی سرویس‌های فشاری (Google FCM، Mozilla Push Service، Apple Push) دسترسی پیدا کند، یک پراکسی پیکربندی کنید:
 
@@ -38,7 +38,7 @@ journalctl -u songbird -f | grep push
 | `web.push.apple.com` | Safari |
 | `*.notify.windows.com` | Edge |
 
-## عیب‌یابی خطاهای تحویل اعلان فشاری
+## عیب‌یابی خطاهای تحویل Push notification
 
 اگر در لاگ‌ها خطاهایی مانند `[push] delivery failed ... status=0 ... AggregateError` می‌بینید، این نشان‌دهنده مشکلات اتصال شبکه برای دسترسی به سرویس‌های فشاری است. دلایل رایج:
 

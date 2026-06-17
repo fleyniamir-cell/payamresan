@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Songbird
-  text: پیام‌رسان خودمیزبان
+  text: پیام‌رسان شخصی
   tagline: یک پلتفرم پیام‌رسان سبک و امن که با هدف حمایت از آزادی دیجیتال در سراسر جهان ساخته شده است.
   image:
     src: /songbird-hero.svg

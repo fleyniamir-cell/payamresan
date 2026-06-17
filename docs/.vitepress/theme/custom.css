@@ -157,13 +157,25 @@
   text-align: right;
 }
 
-/* Home hero text + feature cards */
+/* Home hero text + feature cards + action buttons.
+ * These elements are inside Vue SFC components with scoped styles, so we
+ * need !important to override the component-scoped direction/alignment. */
 [lang^='fa'] .VPHero .text,
 [lang^='fa'] .VPHero .tagline,
+[lang^='fa'] .VPHero .actions {
+  direction: rtl !important;
+  text-align: right !important;
+}
+
 [lang^='fa'] .VPFeatures .title,
 [lang^='fa'] .VPFeatures .details {
-  direction: rtl;
-  text-align: right;
+  direction: rtl !important;
+  text-align: right !important;
+}
+
+/* VitePress built-in footer copyright (visible on home page) */
+[lang^='fa'] .VPFooter {
+  direction: rtl !important;
 }
 
 /* Keep code blocks, inline code, and command samples left-to-right. */
@@ -172,6 +184,17 @@
 [lang^='fa'] .vp-doc code {
   direction: ltr;
   text-align: left;
+}
+
+/* Inline code inside paragraphs: keep LTR but allow it to sit naturally
+ * in RTL flow by switching to inline-block with explicit LTR direction. */
+[lang^='fa'] .vp-doc p code,
+[lang^='fa'] .vp-doc li code,
+[lang^='fa'] .vp-doc td code,
+[lang^='fa'] .vp-doc th code {
+  direction: ltr;
+  unicode-bidi: embed;
+  display: inline;
 }
 
 /* Lists and blockquotes follow RTL flow. */
@@ -185,4 +208,29 @@
 [lang^='fa'] .vp-doc th,
 [lang^='fa'] .vp-doc td {
   text-align: right;
+}
+
+/* Doc footer: edit link + last updated timestamp */
+[lang^='fa'] .VPDocFooter .edit-info,
+[lang^='fa'] .VPDocFooter .edit-link,
+[lang^='fa'] .VPDocFooter .last-updated,
+[lang^='fa'] .VPDocFooter .VPLastUpdated {
+  direction: rtl;
+  text-align: right;
+}
+
+/* Prev/next pager buttons */
+[lang^='fa'] .VPDocFooter .pager-link .desc,
+[lang^='fa'] .VPDocFooter .pager-link .title {
+  direction: rtl;
+  text-align: right;
+}
+
+/* Reverse pager arrow direction for RTL reading order */
+[lang^='fa'] .VPDocFooter .pager-link.prev {
+  text-align: right;
+}
+
+[lang^='fa'] .VPDocFooter .pager-link.next {
+  text-align: left;
 }

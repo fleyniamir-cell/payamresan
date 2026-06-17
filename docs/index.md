@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Songbird
-  text: Self-hosted chat platform
+  text: Self-hosted chat
   tagline: A secure, lightweight chat platform designed to empower digital freedom worldwide.
   image:
     src: /songbird-hero.svg

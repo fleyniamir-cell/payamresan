@@ -10,6 +10,7 @@ const enSidebar = [
       {text: '🛠️ Manual Installation', link: '/Manual-Installation'},
       {text: '🌐 Configure Nginx', link: '/Nginx-Configuration'},
       {text: '🔒 SSL Certificates', link: '/SSL-Certificates'},
+      {text: '☁️ Running behind a CDN', link: '/CDN-Setup'},
       {text: '🧭 Subpath Hosting', link: '/Subpath-Hosting'},
     ],
   },
@@ -43,6 +44,7 @@ const faSidebar = [
       {text: '🛠️ نصب دستی', link: '/fa/Manual-Installation'},
       {text: '🌐 کانفیگ Nginx', link: '/fa/Nginx-Configuration'},
       {text: '🔒 گواهی‌های SSL', link: '/fa/SSL-Certificates'},
+      {text: '☁️ اجرا پشت CDN', link: '/fa/CDN-Setup'},
       {text: '🧭 اجرا روی Subpath', link: '/fa/Subpath-Hosting'},
     ],
   },
@@ -68,8 +70,8 @@ const faSidebar = [
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: 'Songbird',
-  description: 'A secure, lightweight, self-hosted chat platform.',
+  title: 'Songbird Docs',
+  description: 'Documentation of Songbird, a secure, lightweight, self-hosted chat platform.',
 
   // Served from a custom domain at the site root.
   base: '/',
@@ -88,6 +90,8 @@ export default defineConfig({
 
     socialLinks: [
       {icon: 'github', link: 'https://github.com/bllackbull/Songbird'},
+      {icon: 'telegram', link: 'https://t.me/songbirdapp'},
+      {icon: 'linkedin', link: 'https://www.linkedin.com/in/pouyakhalilii/'}
     ],
 
     search: {

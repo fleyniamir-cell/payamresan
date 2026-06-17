@@ -26,7 +26,7 @@
 | دامنه resolve نمی‌شود / گواهی‌نامه شکست می‌خورد | تفکیک DNS | [مشکلات تفکیک DNS](#dns-resolution-problems) |
 | `502 Bad Gateway` | اپلیکیشن در حال اجرا نیست یا پورت پراکسی نادرست است | [اپلیکیشن راه‌اندازی نمی‌شود / 502](#app-wont-start--502-bad-gateway) |
 | سایت بارگذاری می‌شود اما به‌روزرسانی‌های زنده متوقف می‌شوند | بافرینگ SSE/پراکسی | [به‌روزرسانی‌های بی‌درنگ نمی‌رسند](#real-time-updates-not-arriving) |
-| اعلان‌های فشاری هرگز نمی‌رسند | HTTPS یا شبکه/پراکسی | [اعلان‌های فشاری](#push-notifications-not-arriving) |
+| Push notifications هرگز نمی‌رسند | HTTPS یا شبکه/پراکسی | [Push notifications](#push-notifications-not-arriving) |
 | آپلودها رد می‌شوند یا شکست می‌خورند | محدودیت‌های اندازه یا دیسک | [شکست در آپلود فایل‌ها](#file-uploads-failing) |
 | ویدیوها پخش نمی‌شوند | ffmpeg / ترنسکد | [ترنسکد ویدیو](#video-transcoding-issues) |
 | بیلد Docker متوقف به‌نظر می‌رسد | دانلود وابستگی | [مشکلات بیلد Docker](#docker-build-issues) |
@@ -140,7 +140,7 @@ Songbird برای پیام‌های زنده و حضور از Server-Sent Events
 - تأیید کنید که هیچ پراکسی بالادست یا CDN، اتصال را بافر یا تایم‌اوت نمی‌کند.
 - بررسی کنید که `proxy_read_timeout` / `proxy_send_timeout` به‌اندازه کافی طولانی باشند (پیکربندی نمونه از `1h` استفاده می‌کند).
 
-## اعلان‌های فشاری نمی‌رسند {#push-notifications-not-arriving}
+## Push notifications نمی‌رسند {#push-notifications-not-arriving}
 
 | نیازمندی | جزئیات |
 |---|---|
@@ -149,7 +149,7 @@ Songbird برای پیام‌های زنده و حضور از Server-Sent Events
 | iOS | به یک PWA نصب‌شده روی iOS 16.4+ نیاز دارد. |
 | قابلیت دسترسی شبکه | سرور باید به نقاط پایانی push (FCM، Mozilla، Apple) دسترسی داشته باشد. |
 
-اگر لاگ‌ها `[push] delivery failed ... status=0 ... AggregateError` را نشان می‌دهند، سرور نمی‌تواند به سرویس‌های push دسترسی پیدا کند. دلایل رایج: مسدودکردن HTTPS خروجی توسط فایروال، شکست‌های DNS، یا شبکه‌ای که به پراکسی نیاز دارد. یک پراکسی را از طریق [پراکسی اعلان فشاری](./Push-Notification-Proxy.md) پیکربندی کنید و اتصال را آزمایش کنید:
+اگر لاگ‌ها `[push] delivery failed ... status=0 ... AggregateError` را نشان می‌دهند، سرور نمی‌تواند به سرویس‌های push دسترسی پیدا کند. دلایل رایج: مسدودکردن HTTPS خروجی توسط فایروال، شکست‌های DNS، یا شبکه‌ای که به پراکسی نیاز دارد. یک پراکسی را از طریق [پراکسی Push notification](./Push-Notification-Proxy.md) پیکربندی کنید و اتصال را آزمایش کنید:
 
 ```bash
 curl -x http://your-proxy:3128 https://fcm.googleapis.com

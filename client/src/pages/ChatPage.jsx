@@ -2910,6 +2910,11 @@ export default function ChatPage({ user, setUser, isDark, setIsDark, toggleTheme
 
   // Helper to close conversation after mobile slide animation completes
   const closeChat = () => {
+    // Clear any pending deferred-open key so the chat doesn't reopen
+    // when the user navigates away (e.g. to the admin panel) and comes back.
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(OPEN_CHAT_ID_KEY);
+    }
     setMobileTab("chats");
     setTimeout(() => {
       setActiveChatId(null);

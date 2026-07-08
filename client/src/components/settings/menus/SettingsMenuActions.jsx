@@ -41,7 +41,6 @@ export function SettingsMenuActions({
 
   return (
     <>
-      {/* Account */}
       <button
         type="button"
         onClick={() => setSettingsPanel("profile")}
@@ -49,22 +48,6 @@ export function SettingsMenuActions({
       >
         <User size={18} className={`${iconCls} icon-anim-sway`} />
         Edit profile
-      </button>
-      <button
-        type="button"
-        onClick={() => setSettingsPanel("security")}
-        className={`${buttonBase} ${accentHover}`}
-      >
-        <ShieldCheck size={18} className={`${iconCls} icon-anim-beat`} />
-        Security
-      </button>
-      <button
-        type="button"
-        onClick={() => setSettingsPanel("data")}
-        className={`${buttonBase} ${accentHover}`}
-      >
-        <Database size={18} className={`${iconCls} icon-anim-bob`} />
-        Data
       </button>
       <button
         type="button"
@@ -94,7 +77,22 @@ export function SettingsMenuActions({
 
       {divider}
 
-      {/* App */}
+      <button
+        type="button"
+        onClick={() => setSettingsPanel("security")}
+        className={`${buttonBase} ${accentHover}`}
+      >
+        <ShieldCheck size={18} className={`${iconCls} icon-anim-beat`} />
+        Security
+      </button>
+      <button
+        type="button"
+        onClick={() => setSettingsPanel("data")}
+        className={`${buttonBase} ${accentHover}`}
+      >
+        <Database size={18} className={`${iconCls} icon-anim-bob`} />
+        Data
+      </button>
       <button
         type="button"
         onClick={onOpenNotifications}
@@ -109,6 +107,9 @@ export function SettingsMenuActions({
         setIsDark={setIsDark}
         thick={isMobile}
       />
+
+      {divider}
+
       <button
         type="button"
         onClick={() => onOpenWhatsNew?.()}

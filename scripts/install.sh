@@ -100,12 +100,9 @@ CURRENT_ENV_FILE=""
 PROMPT_FD=0
 PROMPT_FD_OUT=1
 DB_BACKUP_PATH=""
-DB_BACKUP_PASSWORD=""
 RESTORE_BACKUP_QUIET="no"
 LAST_UNZIP_OUTPUT=""
 LAST_UNZIP_STATUS=0
-EXTRACT_SOURCE_DIR=""
-EXTRACT_ENV_SRC=""
 SOURCE_MODE=""
 SOURCE_ZIP_PATH=""
 CERT_MODE="http"
@@ -939,87 +936,6 @@ prompt_install_backup_restore() {
   return 0
 }
 
-validate_backup_zip() {
-  local zip_path="$1"
-  local listing
-  listing="$(run_as_root_output unzip -Z1 "$zip_path" 2>/dev/null || true)"
-  if [[ -z "$listing" ]]; then
-    printf "Backup zip appears empty or unreadable.\n"
-    return 1
-  fi
-  if ! echo "$listing" | grep -qE '(^|/)data/songbird\.db$|(^|/)(songbird\.db)$'; then
-    printf "Backup zip missing songbird.db.\n"
-    return 1
-  fi
-  if ! echo "$listing" | grep -qE '(^|/)data/uploads(/|$)|(^|/)uploads(/|$)'; then
-    printf "Backup zip missing uploads/ directory.\n"
-    return 1
-  fi
-  return 0
-}
-
-zip_contains_data_dir() {
-  local zip_path="$1"
-  local listing
-  listing="$(run_as_root_output unzip -Z1 "$zip_path" 2>/dev/null || true)"
-  if [[ -z "$listing" ]]; then
-    return 1
-  fi
-  echo "$listing" | grep -qE '(^|/)data(/|$)'
-}
-
-prepare_source_root_for_data_copy() {
-  local zip_path="$1"
-  local source_root="$2"
-  local action_label="$3"
-
-  if ! zip_contains_data_dir "$zip_path"; then
-    return 0
-  fi
-
-  if [[ "$(prompt_yes_no "Source zip includes data/. Replace ${INSTALL_DIR}/data during ${action_label}?" "no")" != "yes" ]]; then
-    log "Keeping existing data/. Skipping data/ from source zip."
-    if [[ -d "$source_root/data" ]]; then
-      run_silent run_as_root rm -rf "$source_root/data"
-    fi
-  fi
-}
-
-extract_backup_zip() {
-  local zip_path="$1"
-  local tmp_dir="$2"
-  local password="${3:-}"
-  EXTRACT_SOURCE_DIR=""
-  EXTRACT_ENV_SRC=""
-
-  if [[ -n "$password" ]]; then
-    run_unzip_capture unzip -P "$password" -q "$zip_path" -d "$tmp_dir" || return 1
-  else
-    run_unzip_capture unzip -q "$zip_path" -d "$tmp_dir" || return 1
-  fi
-
-  local source_dir="$tmp_dir"
-  local env_src="$tmp_dir/.env"
-  if [[ -d "$tmp_dir/data" ]]; then
-    source_dir="$tmp_dir/data"
-  fi
-
-  local db_src="$source_dir/songbird.db"
-  local uploads_src="$source_dir/uploads"
-
-  if [[ ! -f "$db_src" || ! -d "$uploads_src" ]]; then
-    return 1
-  fi
-
-  if [[ ! -f "$env_src" && -f "$source_dir/.env" ]]; then
-    env_src="$source_dir/.env"
-  fi
-
-  EXTRACT_SOURCE_DIR="$source_dir"
-  EXTRACT_ENV_SRC="$env_src"
-  return 0
-}
-
 detect_os() {
   [[ -f /etc/os-release ]] || fail "Cannot detect OS (/etc/os-release missing)."
   # shellcheck disable=SC1091
@@ -1502,8 +1418,6 @@ install_source_from_zip() {
   local tmp_dir="${extract_result%%|*}"
   local source_root="${extract_result#*|}"
 
-  prepare_source_root_for_data_copy "$zip_path" "$source_root" "install"
-
   run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/ || {
     run_silent run_as_root rm -rf "$tmp_dir"
     return 1
@@ -1528,8 +1442,6 @@ update_source_from_zip() {
   extract_result="$(extract_offline_source_zip "$zip_path" "update")" || return 1
   local tmp_dir="${extract_result%%|*}"
   local source_root="${extract_result#*|}"
-
-  prepare_source_root_for_data_copy "$zip_path" "$source_root" "update"
 
   run_silent run_as_root cp -a "$source_root"/. "$INSTALL_DIR"/ || {
     run_silent run_as_root rm -rf "$tmp_dir"
@@ -2541,34 +2453,15 @@ backup_database() {
     warn "Server directory not found; skipping DB backup."
     return 0
   fi
-  local backup_password=""
-  backup_password="$(prompt_secret "Backup password")"
   log "Backing up database before update..."
-  if ! run_in_install_dir "npm --prefix server run db:backup -- --password $(printf '%q' "$backup_password")"; then
+  if ! run_in_install_dir "npm --prefix server run db:backup"; then
     warn "DB backup command failed. Update aborted."
     return 1
   fi
 }
 
 preserve_backup_and_restore_data() {
-  log "Preserving data directory during update..."
-  # Since /data/ is in .gitignore, it will remain untouched during git operations
-  # However, we locate the backup for recovery purposes if needed
-  if [[ -d "$INSTALL_DIR/data/backups" ]]; then
-    local latest_backup="$(ls -t "$INSTALL_DIR/data/backups"/songbird-backup-*.db 2>/dev/null | head -1)"
-    if [[ -n "$latest_backup" ]]; then
-      # Copy backup to root directory for easy access and recovery
-      local backup_filename="$(basename "$latest_backup")"
-      log "Found database backup: $latest_backup"
-      
-      if run_silent run_as_root cp "$latest_backup" "/$backup_filename"; then
-        log "✓ Backup copied to /$backup_filename for recovery purposes."
-      else
-        warn "Failed to copy backup to /. Backup remains in $INSTALL_DIR/data/backups/"
-      fi
-    fi
-  fi
-  log "Data directory (/data/) will remain untouched during git update."
+  log "Data directory (${INSTALL_DIR}/data) remains untouched during update."
 }
 
 run_migrations() {

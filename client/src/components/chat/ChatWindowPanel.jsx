@@ -1276,62 +1276,16 @@ export default function ChatWindowPanel({
                           <span className="sb-typing-dot" />
                           <span className="sb-typing-dot" />
                         </span>
-                        {typingIndicator?.type === "group_single" ? (
-                          <span
-                            className="block min-w-0 truncate whitespace-nowrap leading-[1.2]"
-                            title={typingIndicator?.fullLabel || typingIndicator?.name || ""}
-                          >
-                            <span
-                              className={`min-w-0 truncate ${
-                                hasPersian(typingIndicator?.name) ? "font-fa sb-fa-baseline-fix" : ""
-                              }`}
-                              dir="auto"
-                              style={{ unicodeBidi: "isolate" }}
-                            >
-                              {typingIndicator?.name}
-                            </span>
-                          </span>
-                        ) : typingIndicator?.type === "group_pair" ? (
-                          <span
-                            className="block min-w-0 truncate whitespace-nowrap leading-[1.2]"
-                            title={typingIndicator?.fullLabel || typingIndicator?.label || ""}
-                            dir="ltr"
-                            style={{ unicodeBidi: "isolate" }}
-                          >
-                            <bdi
-                              className={`min-w-0 truncate ${
-                                hasPersian(typingIndicator?.firstName)
-                                  ? "font-fa sb-fa-baseline-fix"
-                                  : ""
-                              }`}
-                              dir="auto"
-                            >
-                              {typingIndicator?.firstName}
-                            </bdi>
-                            <span className="px-1">and</span>
-                            <bdi
-                              className={`min-w-0 truncate ${
-                                hasPersian(typingIndicator?.secondName)
-                                  ? "font-fa sb-fa-baseline-fix"
-                                  : ""
-                              }`}
-                              dir="auto"
-                            >
-                              {typingIndicator?.secondName}
-                            </bdi>
-                          </span>
-                        ) : (
-                          <span
-                            className={`block min-w-0 truncate whitespace-nowrap leading-[1.2] ${
-                              hasPersian(typingIndicator?.label) ? "font-fa sb-fa-baseline-fix" : ""
-                            }`}
-                            dir="auto"
-                            style={{ unicodeBidi: "plaintext" }}
-                            title={typingIndicator?.fullLabel || typingIndicator?.label}
-                          >
-                            {typingIndicator?.label}
-                          </span>
-                        )}
+                        <span
+                          className={`block min-w-0 truncate whitespace-nowrap font-semibold leading-[1.2] text-emerald-500 dark:text-emerald-300 ${
+                            hasPersian(typingIndicator?.label) ? "font-fa sb-fa-baseline-fix" : ""
+                          }`}
+                          dir="auto"
+                          style={{ unicodeBidi: "plaintext" }}
+                          title={typingIndicator?.fullLabel || typingIndicator?.label}
+                        >
+                          {typingIndicator?.label}
+                        </span>
                       </>
                     ) : isGroupChat || isChannelChat ? (
                       <span
@@ -1345,25 +1299,20 @@ export default function ChatWindowPanel({
                         {peerStatusLabel}
                       </span>
                     ) : (
-                      <>
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            peerStatusLabel === "online"
-                              ? "bg-emerald-400"
-                              : "bg-slate-400"
-                          }`}
-                        />
-                        <span
-                          className={`block min-w-0 truncate leading-[1.2] ${
-                            hasPersian(peerStatusLabel) ? "font-fa sb-fa-baseline-fix" : ""
-                          }`}
-                          dir="auto"
-                          style={{ unicodeBidi: "plaintext" }}
-                          title={peerStatusLabel}
-                        >
-                          {peerStatusLabel}
-                        </span>
-                      </>
+                      <span
+                        className={`block min-w-0 truncate leading-[1.2] ${
+                          peerStatusLabel === "online"
+                            ? "font-semibold text-emerald-500 dark:text-emerald-300"
+                            : ""
+                        } ${
+                          hasPersian(peerStatusLabel) ? "font-fa sb-fa-baseline-fix" : ""
+                        }`}
+                        dir="auto"
+                        style={{ unicodeBidi: "plaintext" }}
+                        title={peerStatusLabel}
+                      >
+                        {peerStatusLabel}
+                      </span>
                     )}
                   </p>
                 ) : null}

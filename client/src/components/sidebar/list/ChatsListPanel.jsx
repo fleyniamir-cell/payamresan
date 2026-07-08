@@ -202,6 +202,8 @@ export default function ChatsListPanel({
                 const dmChatId = resolveDmChatId(member.username);
                 const isActive =
                   dmChatId && Number(activeChatId) === Number(dmChatId);
+                const showOnlineBadge =
+                  String(member.status || "").toLowerCase() === "online";
                 return (
                   <ContextMenuSurface
                     key={`discover-user-${member.id}-${member.username}`}
@@ -239,6 +241,7 @@ export default function ChatsListPanel({
                       name={label}
                       color={member.color || "#10b981"}
                       initials={initials}
+                      showOnlineBadge={showOnlineBadge}
                       className="h-9 w-9 text-xs"
                     />
                     <div className="min-w-0">
@@ -465,6 +468,10 @@ export default function ChatsListPanel({
               ? members.find((member) => member.username !== user.username)
               : null;
           const isDeletedDm = conv.type === "dm" && !other;
+          const showOnlineBadge =
+            conv.type === "dm" &&
+            !isDeletedDm &&
+            String(other?.status || "").toLowerCase() === "online";
           const isChannel = conv.type === "channel";
           const isGroup = conv.type === "group";
           const isSaved = conv.type === "saved";
@@ -548,6 +555,7 @@ export default function ChatsListPanel({
                     )
                   }
                   className="h-9 w-9 shrink-0"
+                  showOnlineBadge={showOnlineBadge}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="flex min-w-0 items-center gap-1.5 font-semibold">

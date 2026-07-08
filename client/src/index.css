@@ -133,6 +133,7 @@
     background-color: #ffffff;
     overscroll-behavior: none;
     user-select: none;
+    -webkit-user-select: none;
     /* Prevent Safari zoom on input focus */
     -webkit-font-smoothing: antialiased;
     -webkit-touch-callout: none;
@@ -161,6 +162,15 @@ input, textarea, select {
   font-size: 16px !important;
 }
 
+html,
+body,
+#root,
+#root * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 input,
 textarea,
 select,
@@ -169,6 +179,7 @@ select,
 .sb-context-menu-selection-target * {
   user-select: text;
   -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* Handle safe areas on notch devices */

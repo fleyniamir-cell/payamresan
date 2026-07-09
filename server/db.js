@@ -319,13 +319,26 @@ export function findUserById(id) {
 export function listUsers(excludeUsername) {
   if (excludeUsername) {
     return getAll(
-      "SELECT id, username, nickname, avatar_url, color, status FROM users WHERE username != ? ORDER BY username",
+      `SELECT id, username, nickname, avatar_url, color,
+              CASE
+                WHEN status = 'online' AND last_seen IS NOT NULL
+                     AND (strftime('%s', 'now') - strftime('%s', last_seen)) <= 12
+                THEN 'online' ELSE 'offline'
+              END AS status
+       FROM users WHERE username != ? ORDER BY username`,
       [excludeUsername],
     );
   }
 
   return getAll(
-    "SELECT id, username, nickname, avatar_url, color, status, banned FROM users ORDER BY username",
+    `SELECT id, username, nickname, avatar_url, color,
+            CASE
+              WHEN status = 'online' AND last_seen IS NOT NULL
+                   AND (strftime('%s', 'now') - strftime('%s', last_seen)) <= 12
+              THEN 'online' ELSE 'offline'
+            END AS status,
+            banned
+     FROM users ORDER BY username`,
   );
 }
 
@@ -334,13 +347,27 @@ export function searchUsers(query, excludeUsername) {
 
   if (excludeUsername) {
     return getAll(
-      "SELECT id, username, nickname, avatar_url, color, status, banned FROM users WHERE username != ? AND (username LIKE ? OR nickname LIKE ?) ORDER BY username",
+      `SELECT id, username, nickname, avatar_url, color,
+              CASE
+                WHEN status = 'online' AND last_seen IS NOT NULL
+                     AND (strftime('%s', 'now') - strftime('%s', last_seen)) <= 12
+                THEN 'online' ELSE 'offline'
+              END AS status,
+              banned
+       FROM users WHERE username != ? AND (username LIKE ? OR nickname LIKE ?) ORDER BY username`,
       [excludeUsername, like, like],
     );
   }
 
   return getAll(
-    "SELECT id, username, nickname, avatar_url, color, status, banned FROM users WHERE username LIKE ? OR nickname LIKE ? ORDER BY username",
+    `SELECT id, username, nickname, avatar_url, color,
+            CASE
+              WHEN status = 'online' AND last_seen IS NOT NULL
+                   AND (strftime('%s', 'now') - strftime('%s', last_seen)) <= 12
+              THEN 'online' ELSE 'offline'
+            END AS status,
+            banned
+     FROM users WHERE username LIKE ? OR nickname LIKE ? ORDER BY username`,
     [like, like],
   );
 }
@@ -1274,7 +1301,15 @@ export function isMember(chatId, userId) {
 export function listChatMembers(chatId) {
   return getAll(
     `
-    SELECT users.id, users.username, users.nickname, users.avatar_url, users.color, users.status, chat_members.role
+    SELECT users.id, users.username, users.nickname, users.avatar_url, users.color,
+           CASE
+             WHEN users.status = 'online'
+                  AND users.last_seen IS NOT NULL
+                  AND (strftime('%s', 'now') - strftime('%s', users.last_seen)) <= 12
+             THEN 'online'
+             ELSE 'offline'
+           END AS status,
+           chat_members.role
     FROM chat_members
     JOIN users ON users.id = chat_members.user_id
     WHERE chat_members.chat_id = ?
@@ -1299,7 +1334,14 @@ export function listChatMembersForChats(chatIds = []) {
   const rows = getAll(
     `
     SELECT chat_members.chat_id,
-           users.id, users.username, users.nickname, users.avatar_url, users.color, users.status,
+           users.id, users.username, users.nickname, users.avatar_url, users.color,
+           CASE
+             WHEN users.status = 'online'
+                  AND users.last_seen IS NOT NULL
+                  AND (strftime('%s', 'now') - strftime('%s', users.last_seen)) <= 12
+             THEN 'online'
+             ELSE 'offline'
+           END AS status,
            chat_members.role
     FROM chat_members
     JOIN users ON users.id = chat_members.user_id

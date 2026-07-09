@@ -54,10 +54,10 @@ export default function AdminPanel({ user, onBack }) {
   // down to the corresponding tab as a prop.  Tabs no longer fetch on mount.
   const { cache, ensureFresh, invalidate, refresh: refreshKey, refreshAll } = useAdminCache({
     stats:    () => api.get("/api/admin/stats"),
-    users:    () => api.get("/api/admin/users?limit=200&sortBy=id&sortDir=ASC"),
-    chats:    () => api.get("/api/admin/chats?limit=200&sortBy=id&sortDir=ASC"),
+    users:    () => api.get("/api/admin/users?limit=1000&sortBy=id&sortDir=ASC"),
+    chats:    () => api.get("/api/admin/chats?limit=1000&sortBy=id&sortDir=ASC"),
     settings: () => api.get("/api/admin/settings"),
-    logs:     () => api.get("/api/admin/logs?limit=300"),
+    logs:     () => api.get("/api/admin/logs?limit=1000"),
   }, { ttlMs: AUTO_REFRESH_MS });
 
   // Convenience aliases so downstream JSX stays readable.

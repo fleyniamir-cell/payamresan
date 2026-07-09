@@ -165,8 +165,8 @@ const AdminLogView = forwardRef(function AdminLogView({ currentUser, cachedData,
                     <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{meta.label}</span>
                     {entry.status === "error" && <span className="text-[10px] font-semibold text-rose-500">failed</span>}
                   </div>
-                  <p className={`mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500 ${detailHasPersian ? "font-fa" : ""}`} dir="auto">
-                    {detailText}
+                  <p className={`mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500 ${detailHasPersian ? "font-fa" : ""}`} dir="ltr">
+                    <bdi>{detailText}</bdi>
                     {detailText ? " · " : ""}
                     {entry.actorUsername ? `@${entry.actorUsername}` : "system"} · {fmtDateTime(entry.ts)}
                   </p>

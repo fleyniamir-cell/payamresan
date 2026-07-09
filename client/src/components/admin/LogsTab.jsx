@@ -183,6 +183,7 @@ const AdminLogView = forwardRef(function AdminLogView({ currentUser, cachedData,
 const SystemLogView = forwardRef(function SystemLogView({ source }, ref) {
   const [data, setData]               = useState(null);
   const [initialized, setInitialized] = useState(false);
+  const logContainerRef = useRef(null);
 
   const load = useCallback(async () => {
     try { const d = await api.get(`/api/admin/logs/${source}`); setData(d); }
@@ -191,6 +192,13 @@ const SystemLogView = forwardRef(function SystemLogView({ source }, ref) {
   }, [source]);
 
   useEffect(() => { setInitialized(false); load(); }, [load]);
+
+  // Auto-scroll to bottom when data loads or updates
+  useEffect(() => {
+    if (data?.lines?.length > 0 && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [data]);
 
   useImperativeHandle(ref, () => ({ refresh: load }), [load]);
 
@@ -202,7 +210,7 @@ const SystemLogView = forwardRef(function SystemLogView({ source }, ref) {
         <EmptyState message="Log is empty." />
       ) : (
         <div className={"overflow-hidden " + cardCls}>
-          <pre className="app-scroll max-h-[60vh] overflow-auto p-4 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+          <pre ref={logContainerRef} className="app-scroll max-h-[60vh] overflow-auto p-4 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
             {data.lines.join("\n")}
           </pre>
         </div>

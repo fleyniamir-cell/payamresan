@@ -64,7 +64,7 @@ const LOG_SOURCES = [
   { id: "nginx",     label: "Nginx" },
 ];
 
-const AdminLogView = forwardRef(function AdminLogView({ currentUser }, ref) {
+const AdminLogView = forwardRef(function AdminLogView({ currentUser, cachedData, isLoading, hasData, onMutated }, ref) {
   const [logs, setLogs]               = useState([]);
   const [initialized, setInitialized] = useState(false);
   const [search, setSearch]           = useState("");
@@ -76,11 +76,30 @@ const AdminLogView = forwardRef(function AdminLogView({ currentUser }, ref) {
 
   const isOwner = currentUser?.role === "owner";
 
-  const load = useCallback(async () => {
-    const q = new URLSearchParams({ limit: 300, search: searchRef.current });
-    try { const d = await api.get(`/api/admin/logs?${q}`); setLogs(d.logs || []); } catch {}
+  // Load data with client-side filtering from the cached full list.
+  const load = useCallback(() => {
+    // Don't process data until we have it
+    if (!cachedData) {
+      setInitialized(false);
+      return;
+    }
+    
+    const s = searchRef.current;
+    let filtered = cachedData.logs ?? [];
+    
+    if (s) {
+      const needle = s.toLowerCase();
+      filtered = filtered.filter((entry) =>
+        (entry.action ?? "").toLowerCase().includes(needle) ||
+        (entry.targetLabel ?? "").toLowerCase().includes(needle) ||
+        (entry.details ?? "").toLowerCase().includes(needle) ||
+        (entry.actorUsername ?? "").toLowerCase().includes(needle)
+      );
+    }
+    
+    setLogs(filtered);
     setInitialized(true);
-  }, []);
+  }, [cachedData]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -92,7 +111,7 @@ const AdminLogView = forwardRef(function AdminLogView({ currentUser }, ref) {
 
   const clearLogs = async () => {
     setClearing(true);
-    try { await api.delete("/api/admin/logs"); await load(); }
+    try { await api.delete("/api/admin/logs"); onMutated(); }
     finally { setClearing(false); setConfirmOpen(false); }
   };
 
@@ -128,7 +147,7 @@ const AdminLogView = forwardRef(function AdminLogView({ currentUser }, ref) {
         onClose={() => setConfirmOpen(false)}
       />
 
-      {!initialized ? <LoadingRows /> : logs.length === 0 ? <EmptyState message="No log entries." /> : (
+      {isLoading && !hasData ? <LoadingRows /> : !initialized ? <LoadingRows /> : logs.length === 0 ? <EmptyState message="No log entries." /> : (
         <div className={"overflow-hidden " + cardCls}>
           {logs.map((entry, i) => {
             const meta = LOG_ACTION_META[entry.action] || { label: entry.action, color: "slate", icon: History };
@@ -193,7 +212,7 @@ const SystemLogView = forwardRef(function SystemLogView({ source }, ref) {
   );
 });
 
-const LogsTab = forwardRef(function LogsTab({ currentUser }, ref) {
+const LogsTab = forwardRef(function LogsTab({ currentUser, cachedData, isLoading, hasData, onMutated }, ref) {
   const [source, setSource] = useState("admin");
   const viewRef = useRef(null);
 
@@ -213,7 +232,7 @@ const LogsTab = forwardRef(function LogsTab({ currentUser }, ref) {
           </button>
         ))}
       </div>
-      {source === "admin" ? <AdminLogView ref={viewRef} currentUser={currentUser} /> : <SystemLogView ref={viewRef} source={source} key={source} />}
+      {source === "admin" ? <AdminLogView ref={viewRef} currentUser={currentUser} cachedData={cachedData} isLoading={isLoading} hasData={hasData} onMutated={onMutated} /> : <SystemLogView ref={viewRef} source={source} key={source} />}
     </div>
   );
 });

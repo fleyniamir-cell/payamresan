@@ -7,7 +7,7 @@ import ConfirmModal from "../modals/ConfirmModal.jsx";
 import Avatar from "../common/Avatar.jsx";
 import { hasPersian } from "../../utils/fontUtils.js";
 
-const ChatsTab = forwardRef(function ChatsTab({ onStatsChange }, ref) {
+const ChatsTab = forwardRef(function ChatsTab({ cachedData, isLoading, hasData, onMutated, onStatsChange }, ref) {
   const [chats, setChats]             = useState([]);
   const [initialized, setInitialized] = useState(false);
   const [search, setSearch]           = useState("");
@@ -32,13 +32,45 @@ const ChatsTab = forwardRef(function ChatsTab({ onStatsChange }, ref) {
     return () => { document.removeEventListener("pointerdown", close, true); document.removeEventListener("keydown", onKey); };
   }, [createMenuOpen]);
 
-  const load = useCallback(async () => {
+  // Load data with client-side filtering/sorting from the cached full list.
+  const load = useCallback(() => {
+    // Don't process data until we have it
+    if (!cachedData) {
+      setInitialized(false);
+      return;
+    }
+    
     const { search: s, typeFilter: type, sortBy: sBy, sortDir: sDir } = paramsRef.current;
-    const q = new URLSearchParams({ limit: 200, search: s, sortBy: sBy, sortDir: sDir });
-    if (type) q.set("type", type);
-    try { const d = await api.get(`/api/admin/chats?${q}`); setChats(d.chats || []); } catch {}
+    let filtered = cachedData.chats ?? [];
+    
+    // Search filter
+    if (s) {
+      const needle = s.toLowerCase();
+      filtered = filtered.filter((c) =>
+        (c.name ?? "").toLowerCase().includes(needle) ||
+        (c.group_username ?? "").toLowerCase().includes(needle)
+      );
+    }
+    
+    // Type filter
+    if (type) {
+      filtered = filtered.filter((c) => c.type === type);
+    }
+    
+    // Sort
+    filtered.sort((a, b) => {
+      let aVal = a[sBy];
+      let bVal = b[sBy];
+      if (typeof aVal === "string") {
+        const cmp = (aVal || "").localeCompare(bVal || "");
+        return sDir === "ASC" ? cmp : -cmp;
+      }
+      return sDir === "ASC" ? aVal - bVal : bVal - aVal;
+    });
+    
+    setChats(filtered);
     setInitialized(true);
-  }, []);
+  }, [cachedData]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -57,7 +89,7 @@ const ChatsTab = forwardRef(function ChatsTab({ onStatsChange }, ref) {
 
   const handleDelete = async (c) => {
     await api.delete(`/api/admin/chats/${c.id}`);
-    load(); onStatsChange();
+    onMutated(); onStatsChange();
   };
 
   const searchHasPersian = hasPersian(search);
@@ -96,7 +128,7 @@ const ChatsTab = forwardRef(function ChatsTab({ onStatsChange }, ref) {
         </div>
       </div>
 
-      {!initialized ? <LoadingRows /> : chats.length === 0 ? <EmptyState message="No chats found." /> : (
+      {isLoading && !hasData ? <LoadingRows /> : !initialized ? <LoadingRows /> : chats.length === 0 ? <EmptyState message="No chats found." /> : (
         <>
           {/* Mobile card list */}
           <div className="space-y-2 sm:hidden">
@@ -213,8 +245,8 @@ const ChatsTab = forwardRef(function ChatsTab({ onStatsChange }, ref) {
         </>
       )}
 
-      {createType && <AdminGroupModal mode="create" initialType={createType} onClose={() => setCreateType(null)} onSaved={() => { load(); onStatsChange(); }} />}
-      {editChat && <AdminGroupModal mode="edit" chat={editChat} onClose={() => setEditChat(null)} onSaved={load} />}
+      {createType && <AdminGroupModal mode="create" initialType={createType} onClose={() => setCreateType(null)} onSaved={() => { onMutated(); onStatsChange(); }} />}
+      {editChat && <AdminGroupModal mode="edit" chat={editChat} onClose={() => setEditChat(null)} onSaved={onMutated} />}
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete chat"

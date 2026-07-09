@@ -7,7 +7,7 @@ import ConfirmModal from "../modals/ConfirmModal.jsx";
 import Avatar from "../common/Avatar.jsx";
 import { hasPersian } from "../../utils/fontUtils.js";
 
-const UsersTab = forwardRef(function UsersTab({ currentUser, onStatsChange }, ref) {
+const UsersTab = forwardRef(function UsersTab({ currentUser, cachedData, isLoading, hasData, onMutated, onStatsChange }, ref) {
   const [users, setUsers]             = useState([]);
   const [initialized, setInitialized] = useState(false);
   const [search, setSearch]           = useState("");
@@ -23,14 +23,54 @@ const UsersTab = forwardRef(function UsersTab({ currentUser, onStatsChange }, re
   const paramsRef = useRef({ search, roleFilter, statusFilter, sortBy, sortDir });
   useEffect(() => { paramsRef.current = { search, roleFilter, statusFilter, sortBy, sortDir }; });
 
-  const load = useCallback(async () => {
+  // Load data with client-side filtering/sorting from the cached full list.
+  const load = useCallback(() => {
+    // Don't process data until we have it
+    if (!cachedData) {
+      setInitialized(false);
+      return;
+    }
+    
     const { search: s, roleFilter: role, statusFilter: status, sortBy: sBy, sortDir: sDir } = paramsRef.current;
-    const q = new URLSearchParams({ limit: 200, search: s, sortBy: sBy, sortDir: sDir });
-    if (role) q.set("role", role);
-    if (status) q.set("status", status);
-    try { const d = await api.get(`/api/admin/users?${q}`); setUsers(d.users || []); } catch {}
+    let filtered = cachedData.users ?? [];
+    
+    // Search filter
+    if (s) {
+      const needle = s.toLowerCase();
+      filtered = filtered.filter((u) =>
+        (u.username ?? "").toLowerCase().includes(needle) ||
+        (u.nickname ?? "").toLowerCase().includes(needle)
+      );
+    }
+    
+    // Role filter
+    if (role) {
+      if (role === "banned") filtered = filtered.filter((u) => u.banned);
+      else filtered = filtered.filter((u) => u.role === role);
+    }
+    
+    // Status filter
+    if (status === "online") filtered = filtered.filter((u) => u.online);
+    else if (status === "offline") filtered = filtered.filter((u) => !u.online);
+    
+    // Sort
+    filtered.sort((a, b) => {
+      let aVal = a[sBy];
+      let bVal = b[sBy];
+      if (sBy === "nickname") {
+        aVal = aVal || a.username;
+        bVal = bVal || b.username;
+      }
+      if (typeof aVal === "string") {
+        const cmp = aVal.localeCompare(bVal);
+        return sDir === "ASC" ? cmp : -cmp;
+      }
+      return sDir === "ASC" ? aVal - bVal : bVal - aVal;
+    });
+    
+    setUsers(filtered);
     setInitialized(true);
-  }, []);
+  }, [cachedData]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -49,15 +89,15 @@ const UsersTab = forwardRef(function UsersTab({ currentUser, onStatsChange }, re
 
   const handleBan = async (u) => {
     await api.post(`/api/admin/users/${u.id}/ban`, { banned: !u.banned });
-    load(); onStatsChange();
+    onMutated(); onStatsChange();
   };
   const handleDelete = async (u) => {
     await api.delete(`/api/admin/users/${u.id}`);
-    load(); onStatsChange();
+    onMutated(); onStatsChange();
   };
   const handleRoleToggle = async (u) => {
     await api.post(`/api/admin/users/${u.id}/role`, { role: u.role === "admin" ? "user" : "admin" });
-    load();
+    onMutated();
   };
 
   // Whether the currently logged-in admin is themselves the server owner.
@@ -84,7 +124,7 @@ const UsersTab = forwardRef(function UsersTab({ currentUser, onStatsChange }, re
         </button>
       </div>
 
-      {!initialized ? <LoadingRows /> : users.length === 0 ? <EmptyState message="No users found." /> : (
+      {isLoading && !hasData ? <LoadingRows /> : !initialized ? <LoadingRows /> : users.length === 0 ? <EmptyState message="No users found." /> : (
         <>
           {/* Mobile card list */}
           <div className="space-y-2 sm:hidden">
@@ -268,8 +308,8 @@ const UsersTab = forwardRef(function UsersTab({ currentUser, onStatsChange }, re
         </>
       )}
 
-      {createOpen && <AdminUserModal mode="create" onClose={() => setCreateOpen(false)} onSaved={() => { load(); onStatsChange(); }} />}
-      {editUser && <AdminUserModal mode="edit" user={editUser} onClose={() => setEditUser(null)} onSaved={load} />}
+      {createOpen && <AdminUserModal mode="create" onClose={() => setCreateOpen(false)} onSaved={() => { onMutated(); onStatsChange(); }} />}
+      {editUser && <AdminUserModal mode="edit" user={editUser} onClose={() => setEditUser(null)} onSaved={onMutated} />}
 
       {/* Role toggle confirm */}
       <ConfirmModal

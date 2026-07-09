@@ -512,7 +512,7 @@ function SettingGroup({ groupKey, defs, effectiveVals, onChange }) {
 
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
-const SettingsTab = forwardRef(function SettingsTab(_props, ref) {
+const SettingsTab = forwardRef(function SettingsTab({ cachedData, isLoading: cachedIsLoading, hasData, onMutated }, ref) {
   const [settings, setSettings] = useState([]);
   const [localVals, setLocalVals] = useState({});
   const [loading, setLoading] = useState(true);
@@ -535,7 +535,21 @@ const SettingsTab = forwardRef(function SettingsTab(_props, ref) {
     );
   };
 
+  // Use cachedData if available, otherwise fetch fresh
   const fetchSettings = useCallback(async () => {
+    if (cachedData?.settings) {
+      setSettings(cachedData.settings);
+      setLocalVals({});
+      setLoading(false);
+      setError("");
+      return;
+    }
+    // If we're actively loading from cache, show loading state
+    if (cachedIsLoading) {
+      setLoading(true);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -547,7 +561,7 @@ const SettingsTab = forwardRef(function SettingsTab(_props, ref) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cachedData, cachedIsLoading]);
 
   useEffect(() => {
     fetchSettings();
@@ -597,6 +611,9 @@ const SettingsTab = forwardRef(function SettingsTab(_props, ref) {
       }
       const d = await r.json();
       setSettings(d.settings ?? settings);
+
+      // Notify parent that the settings cache should be refreshed.
+      onMutated?.();
 
       // Check if any of the saved keys require a restart
       const needsRestart = dirtyKeys.some((key) => defsByKey[key]?.restart);
@@ -651,6 +668,7 @@ const SettingsTab = forwardRef(function SettingsTab(_props, ref) {
       const data = await api.get("/api/admin/settings");
       setSettings(data.settings ?? []);
       setLocalVals({});
+      onMutated?.();
       flash("All settings restored to defaults.");
     } catch {
       flash("Restore failed.", "error");

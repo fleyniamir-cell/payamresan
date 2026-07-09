@@ -246,7 +246,10 @@ app.use((req, res, next) => {
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 1000,
+  // Skip the SSE endpoint — it's a long-lived connection, not a discrete
+  // request, and counting it burns the budget instantly.
+  skip: (req) => req.path === "/api/events",
 });
 
 const staticLimiter = rateLimit({

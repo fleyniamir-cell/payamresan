@@ -788,9 +788,10 @@ function registerAdminPanelRoutes(app, deps) {
     res.json(readInstallerLog({ maxLines: 400 }));
   });
 
-  app.get("/api/admin/logs/nginx", (req, res) => {
+  app.get("/api/admin/logs/nginx", async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    res.json(readNginxLog({ maxLines: 400 }));
+    const result = await readNginxLog({ maxLines: 400 });
+    res.json(result);
   });
 
   app.get("/api/admin/logs/service", async (req, res) => {

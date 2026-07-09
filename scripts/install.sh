@@ -1167,6 +1167,44 @@ ensure_service_user_exists() {
     log "Creating dedicated system user: ${SERVICE_USER}"
     run_silent run_as_root useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" || return 1
   fi
+
+  # Add the service user to groups needed for log access.
+  # adm         — grants read access to /var/log/nginx/* (and other system logs)
+  # systemd-journal — grants access to journalctl without root
+  local groups_to_add=()
+  if getent group adm >/dev/null 2>&1; then
+    groups_to_add+=("adm")
+  fi
+  if getent group systemd-journal >/dev/null 2>&1; then
+    groups_to_add+=("systemd-journal")
+  fi
+  for grp in "${groups_to_add[@]}"; do
+    if ! id -nG "$SERVICE_USER" 2>/dev/null | grep -qw "$grp"; then
+      log "Adding ${SERVICE_USER} to group: ${grp}"
+      run_silent run_as_root usermod -aG "$grp" "$SERVICE_USER" || true
+    fi
+  done
+
+  # Install a passwordless sudoers drop-in so the service process can
+  # control its own systemd unit and read nginx/service logs via sudo -n.
+  local sudoers_drop_in="/etc/sudoers.d/songbird"
+  local sudoers_content="# Songbird — allow the service user to control its own unit
+# and read privileged logs without a password.
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/journalctl -u ${SERVICE_NAME} *
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/cat /var/log/nginx/error.log
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/cat /var/log/nginx/access.log
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/nginx -t
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
+"
+  if run_as_root bash -c "printf '%s' $(printf '%q' "$sudoers_content") | visudo -c -f /dev/stdin" >/dev/null 2>&1; then
+    log "Installing sudoers drop-in at ${sudoers_drop_in}..."
+    run_silent run_as_root bash -c "printf '%s' $(printf '%q' "$sudoers_content") > '$sudoers_drop_in'"
+    run_silent run_as_root chmod 440 "$sudoers_drop_in" || true
+  else
+    warn "Could not validate sudoers drop-in — skipping. Service control from the admin panel may not work."
+  fi
 }
 
 map_lego_arch() {

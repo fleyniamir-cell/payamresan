@@ -1,3 +1,32 @@
+## 0.11.1
+
+### New Features
+
+- 🧠 Smart caching with proper silent background updates for admin panel
+
+### Improvements
+
+- 📊 Increased admin data limits to 1000 rows per tab
+- 🚀 Raised API rate limit to 1000 req/15min and excluded SSE endpoint
+- 📜 Auto-scroll system logs to bottom on load for better visibility
+- 📱 Responsive log windows on mobile screens (40vh on mobile, 60vh on desktop)
+- 🌐 Enhanced bidirectional text handling in log descriptions
+
+### Bug Fixes
+
+- 🔒 Resolved permission issues for logs and service control on dedicated-user deployments
+- 👥 Fixed presence status computed server-side on initial load (eliminates ghost green dot)
+
+**⏺️ If you encountered any problem, don't forget to submit an issue on Songbird github repository.**
+
+**⭐ Don't forget to give a star to Songbird github repository!**
+
+🕊️ [Songbird main server](https://chat.songbird.website/invite/songbird)
+
+📢 [Songbird Telegram channel](https://t.me/songbirdapp)
+
+🌐 [Songbird Github repository](https://github.com/bllackbull/Songbird)
+
 ## 0.11.0
 
 ### New Features
@@ -16,16 +45,6 @@
 - 🎨 Settings page design improvements to be more touch-friendly for mobile screens
 - 🕑 Show "last seen" timestamp status for non-invisible users
 - 🔧 Bug fixes
-
-**⏺️ If you encountered any problem, don't forget to submit an issue on Songbird github repository.**
-
-**⭐ Don't forget to give a star to Songbird github repository!**
-
-🕊️ [Songbird main server](https://chat.songbird.website/invite/songbird)
-
-📢 [Songbird Telegram channel](https://t.me/songbirdapp)
-
-🌐 [Songbird Github repository](https://github.com/bllackbull/Songbird)
 
 ## 0.10.3
 

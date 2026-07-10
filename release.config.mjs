@@ -18,6 +18,8 @@ const SECTION_ORDER = {
   Features: 1,
   "Performance Improvements": 2,
   "Bug Fixes": 3,
+  Build: 4,
+  Documentation: 5,
 };
 
 const commitGroupsSort = (a, b) => {
@@ -63,6 +65,21 @@ export default {
     [
       "@semantic-release/release-notes-generator",
       {
+        preset: "conventionalcommits",
+        presetConfig: {
+          types: [
+            { type: "feat", section: "Features" },
+            { type: "fix", section: "Bug Fixes" },
+            { type: "perf", section: "Performance Improvements" },
+            { type: "refactor", section: "Performance Improvements" },
+            { type: "style", section: "Performance Improvements" },
+            { type: "build", section: "Build" },
+            { type: "docs", section: "Documentation" },
+            { type: "chore", hidden: true },
+            { type: "ci", hidden: true },
+            { type: "test", hidden: true },
+          ],
+        },
         writerOpts: {
           commitGroupsSort,
           commitPartial,

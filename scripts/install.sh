@@ -1164,9 +1164,12 @@ node_tools_path_prefix() {
 
 
 ensure_service_user_exists() {
+  # Create user if it doesn't exist
   if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     log "Creating dedicated system user: ${SERVICE_USER}"
     run_silent run_as_root useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" || return 1
+  else
+    log "Service user ${SERVICE_USER} already exists."
   fi
 
   # Add the service user to groups needed for log access.
@@ -1179,10 +1182,13 @@ ensure_service_user_exists() {
   if getent group systemd-journal >/dev/null 2>&1; then
     groups_to_add+=("systemd-journal")
   fi
+  
   for grp in "${groups_to_add[@]}"; do
     if ! id -nG "$SERVICE_USER" 2>/dev/null | grep -qw "$grp"; then
       log "Adding ${SERVICE_USER} to group: ${grp}"
       run_silent run_as_root usermod -aG "$grp" "$SERVICE_USER" || true
+    else
+      log "User ${SERVICE_USER} already in group: ${grp}"
     fi
   done
 
@@ -1199,10 +1205,25 @@ ${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/cat /var/log/nginx/access.log
 ${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/nginx -t
 ${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
 "
+  
+  # Always validate and install/update the sudoers drop-in
   if run_as_root bash -c "printf '%s' $(printf '%q' "$sudoers_content") | visudo -c -f /dev/stdin" >/dev/null 2>&1; then
-    log "Installing sudoers drop-in at ${sudoers_drop_in}..."
-    run_silent run_as_root bash -c "printf '%s' $(printf '%q' "$sudoers_content") > '$sudoers_drop_in'"
-    run_silent run_as_root chmod 440 "$sudoers_drop_in" || true
+    # Check if the file exists and has the correct content
+    local needs_update="yes"
+    if [[ -f "$sudoers_drop_in" ]]; then
+      local existing_content=""
+      existing_content="$(run_as_root cat "$sudoers_drop_in" 2>/dev/null || true)"
+      if [[ "$existing_content" == "$sudoers_content" ]]; then
+        needs_update="no"
+        log "Sudoers drop-in at ${sudoers_drop_in} is already up to date."
+      fi
+    fi
+    
+    if [[ "$needs_update" == "yes" ]]; then
+      log "Installing sudoers drop-in at ${sudoers_drop_in}..."
+      run_silent run_as_root bash -c "printf '%s' $(printf '%q' "$sudoers_content") > '$sudoers_drop_in'"
+      run_silent run_as_root chmod 440 "$sudoers_drop_in" || true
+    fi
   else
     warn "Could not validate sudoers drop-in — skipping. Service control from the admin panel may not work."
   fi
@@ -2695,6 +2716,9 @@ update_songbird() {
     log "Synchronizing database schema with latest version..."
     run_migrations || return 1
 
+    log "Ensuring service user configuration is up to date..."
+    ensure_service_user_exists || return 1
+
     apply_ownership || return 1
     if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then
       log "Global command synchronized from updated install script."
@@ -2768,6 +2792,9 @@ update_songbird() {
   
   log "Synchronizing database schema with latest version..."
   run_migrations || return 1
+
+  log "Ensuring service user configuration is up to date..."
+  ensure_service_user_exists || return 1
 
   apply_ownership || return 1
   if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then

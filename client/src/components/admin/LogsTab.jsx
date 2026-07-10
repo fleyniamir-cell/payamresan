@@ -210,7 +210,7 @@ const SystemLogView = forwardRef(function SystemLogView({ source }, ref) {
         <EmptyState message="Log is empty." />
       ) : (
         <div className={"overflow-hidden " + cardCls}>
-          <pre ref={logContainerRef} className="app-scroll max-h-[60vh] overflow-auto p-4 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+          <pre ref={logContainerRef} className="app-scroll max-h-[40vh] overflow-auto p-3 text-[10px] leading-relaxed text-slate-600 sm:max-h-[60vh] sm:p-4 sm:text-[11px] dark:text-slate-300">
             {data.lines.join("\n")}
           </pre>
         </div>

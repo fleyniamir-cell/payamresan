@@ -16,7 +16,7 @@
 // afterwards alphabetically.
 const SECTION_ORDER = {
   Features: 1,
-  "Performance Improvements": 2,
+    Improvements: 2,
   "Bug Fixes": 3,
   Build: 4,
   Documentation: 5,
@@ -70,9 +70,9 @@ export default {
           types: [
             { type: "feat", section: "Features" },
             { type: "fix", section: "Bug Fixes" },
-            { type: "perf", section: "Performance Improvements" },
-            { type: "refactor", section: "Performance Improvements" },
-            { type: "style", section: "Performance Improvements" },
+            { type: "perf", section: "Improvements" },
+            { type: "refactor", section: "Improvements" },
+            { type: "style", section: "Improvements" },
             { type: "build", section: "Build" },
             { type: "docs", section: "Documentation" },
             { type: "chore", hidden: true },

@@ -1989,6 +1989,7 @@ write_full_env_with_defaults() {
 }
 
 apply_ownership() {
+  log "Ensuring service user configuration and file ownership..."
   ensure_service_user_exists || return 1
   run_silent run_as_root chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$INSTALL_DIR" || return 1
   run_silent run_as_root git config --global --add safe.directory "$INSTALL_DIR" || return 1
@@ -2716,9 +2717,6 @@ update_songbird() {
     log "Synchronizing database schema with latest version..."
     run_migrations || return 1
 
-    log "Ensuring service user configuration is up to date..."
-    ensure_service_user_exists || return 1
-
     apply_ownership || return 1
     if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then
       log "Global command synchronized from updated install script."
@@ -2792,9 +2790,6 @@ update_songbird() {
   
   log "Synchronizing database schema with latest version..."
   run_migrations || return 1
-
-  log "Ensuring service user configuration is up to date..."
-  ensure_service_user_exists || return 1
 
   apply_ownership || return 1
   if install_global_command_from_path "$INSTALL_DIR/scripts/install.sh"; then

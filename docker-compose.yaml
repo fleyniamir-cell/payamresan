@@ -18,6 +18,7 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     volumes:
       - songbird-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
 
   nginx:
     image: nginx:alpine

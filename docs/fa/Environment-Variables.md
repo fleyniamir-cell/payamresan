@@ -2,7 +2,7 @@
 
 :::tip
 
-می‌توانید به‌راحتی فایل ‎.env‎ خود را از طریق [اسکریپت نصب](./Deployment-Script.md) ویرایش کنید و این کار به‌طور خودکار تغییرات را اعمال کرده و اپلیکیشن را برای شما بازسازی می‌کند!
+می‌توانید به‌راحتی بیشتر این متغیرها را از طریق پنل مدیریت بدون دست زدن به فایل `.env` پیکربندی کنید. برای اطلاعات بیشتر به [پنل مدیریت](./Admin-Panel.md) مراجعه کنید.
 
 :::
 
@@ -23,6 +23,7 @@ nano .env
 | `APP_ENV` | `string` | `production` | حالت اجرای سرور (`production` توصیه‌شده/پیش‌فرض است). |
 | `APP_DEBUG` | `boolean` | `false` | فعال‌کردن لاگ‌های پرجزئیات اشکال‌زدایی سرور در ترمینال/stdout (خطوط `[app-debug]` برای رویدادهای ارسال پیام/آپلود/ترنسکد/متادیتا). |
 | `SIGN_UP` | `boolean` | `true` | اجازه ایجاد حساب‌های جدید از طریق وب‌سایت (`/signup`). (`ACCOUNT_CREATION` به‌عنوان جایگزین قدیمی پشتیبانی می‌شود.) |
+| `ADMIN_PANEL` | `boolean` | `true` | فعال‌کردن رابط پنل مدیریت. وقتی `false` باشد، پنل مدیریت کاملاً غیرفعال و غیرقابل‌دسترس است. |
 | `FILE_UPLOAD` | `boolean` | `true` | فعال/غیرفعال‌کردن همه آپلودها به‌صورت سراسری (فایل‌های چت + آواتارها). |
 | `FILE_UPLOAD_MAX_SIZE_MB` | `integer` | `25` | حداکثر اندازه آپلود هر فایل (مگابایت). (`FILE_UPLOAD_MAX_SIZE` به‌عنوان جایگزین قدیمی به بایت پشتیبانی می‌شود.) |
 | `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` | `integer` | `75` | سقف اندازه کل آپلود برای هر پیام (مگابایت). (`FILE_UPLOAD_MAX_TOTAL_SIZE` به‌عنوان جایگزین قدیمی به بایت پشتیبانی می‌شود.) |
@@ -31,19 +32,19 @@ nano .env
 | `MESSAGE_FILE_RETENTION` | `integer` | `7` | حذف خودکار فایل‌های پیام آپلودشده پس از N روز (`0` غیرفعال می‌کند). |
 | `MESSAGE_TEXT_RETENTION` | `integer` | `0` | حذف خودکار پیام‌های فقط‌متنی پس از N روز (`0` غیرفعال می‌کند). |
 | `MESSAGE_MAX_CHARS` | `integer` | `4000` | حداکثر طول پیام. |
-| `REMOTE_CHANNEL` | `boolean` | `false` | فعال‌کردن worker سمت‌سرور کانال راه دور. |
-| `REMOTE_CHANNEL_UI` | `boolean` | `true` | اجازه به مالکان کانال برای فعال‌کردن کانال راه دور در رابط کاربری. وقتی `false` باشد، کلید کانال راه دور برای همه کانال‌ها غیرفعال و قفل می‌شود، و کانال‌های موجود که آن را فعال دارند به‌طور خودکار در رابط کاربری خاموش‌شدن آن را می‌بینند. |
+| `REMOTE_CHANNEL` | `boolean` | `false` | فعال‌کردن worker سمت‌سرور کانال ریموت. |
+| `REMOTE_CHANNEL_UI` | `boolean` | `true` | اجازه به مالکان کانال برای فعال‌کردن کانال ریموت در رابط کاربری. وقتی `false` باشد، کلید کانال ریموت برای همه کانال‌ها غیرفعال و قفل می‌شود، و کانال‌های موجود که آن را فعال دارند به‌طور خودکار در رابط کاربری خاموش‌شدن آن را می‌بینند. |
 | `REMOTE_CHANNEL_MEDIA_STREAM` | `boolean` | `true` | اجازه به مالکان کانال برای فعال‌کردن گزینه «Stream Media Files» در رابط کاربری. وقتی `false` باشد، این گزینه برای همه کانال‌ها غیرفعال و قفل می‌شود. |
 | `REMOTE_CHANNEL_TELEGRAM_API_ID` | `integer` | `0` | API ID مربوط به Telegram. |
 | `REMOTE_CHANNEL_TELEGRAM_API_HASH` | `string` | `""` | API hash مربوط به Telegram. |
 | `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` | `string` | `""` | StringSession مربوط به Telegram. با آن مانند یک رمز عبور رفتار کنید. |
 | `REMOTE_CHANNEL_TELEGRAM_PROXY_URL` | `string` | `""` | نشانی پراکسی MTProto مربوط به Telegram. (`REMOTE_CHANNEL_PROXY_URL` به‌عنوان جایگزین قدیمی پشتیبانی می‌شود.) |
-| `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` | `string` | `""` | پراکسی HTTP/HTTPS برای درخواست‌های خروجی از این سرور به سرورهای راه دور Songbird. |
-| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `integer` | `5000` | فاصله زمانی بررسی منابع فعال کانال راه دور توسط poller. |
+| `REMOTE_CHANNEL_SONGBIRD_PROXY_URL` | `string` | `""` | پراکسی HTTP/HTTPS برای درخواست‌های خروجی از این سرور به سرورهای ریموت Songbird. |
+| `REMOTE_CHANNEL_POLL_INTERVAL_MS` | `integer` | `5000` | فاصله زمانی بررسی منابع فعال کانال ریموت توسط poller. |
 | `REMOTE_CHANNEL_TELEGRAM_POLL_LIMIT` | `integer` | `50` | حداکثر تعداد پست‌های Telegram دریافت‌شده در هر poll برای هر منبع (`1`-`100`). |
-| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `integer` | `1000` | فاصله زمانی پردازش پست‌های راه دور در انتظار توسط worker صف بازتاب. |
-| `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `integer` | `10` | حداکثر تعداد تلاش مجدد پیش از آنکه یک پست راه دور در صف به‌عنوان ناموفق علامت‌گذاری شود. |
-| `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `integer` | `10` | حداکثر تعداد پست‌های راه دور در صف که در هر تیک worker پردازش می‌شوند (`1`-`50`). |
+| `REMOTE_CHANNEL_QUEUE_INTERVAL_MS` | `integer` | `1000` | فاصله زمانی پردازش پست‌های ریموت در انتظار توسط worker صف بازتاب. |
+| `REMOTE_CHANNEL_QUEUE_MAX_ATTEMPTS` | `integer` | `10` | حداکثر تعداد تلاش مجدد پیش از آنکه یک پست ریموت در صف به‌عنوان ناموفق علامت‌گذاری شود. |
+| `REMOTE_CHANNEL_QUEUE_BATCH_SIZE` | `integer` | `10` | حداکثر تعداد پست‌های ریموت در صف که در هر تیک worker پردازش می‌شوند (`1`-`50`). |
 | `REMOTE_CHANNEL_QUEUE_CONCURRENCY` | `integer` | `3` | تعداد آیتم‌های در صف که به‌صورت هم‌زمان در هر تیک worker پردازش می‌شوند. همچنین تعداد منابعی که به‌صورت موازی poll می‌شوند را کنترل می‌کند. |
 | `REMOTE_CHANNEL_QUEUE_STALE_LOCK_MS` | `integer` | `300000` | سنی که پس از آن یک قفل صف درحال‌پردازش کهنه تلقی شده و می‌تواند دوباره تلاش شود. |
 | `CHAT_PENDING_TEXT_TIMEOUT` | `integer` | `300000` | علامت‌گذاری پیام متنی در انتظار به‌عنوان ناموفق پس از این مهلت (میلی‌ثانیه). |
@@ -64,10 +65,11 @@ nano .env
 | `NICKNAME_MAX_CHARS` | `integer` | `24` | حداکثر طول نام مستعار برای کاربران و گروه‌ها. (`NICKNAME_MAX` به‌عنوان جایگزین قدیمی پشتیبانی می‌شود.) |
 | `USERNAME_MAX_CHARS` | `integer` | `16` | حداکثر طول نام کاربری برای کاربران و گروه‌ها. (`USERNAME_MAX` به‌عنوان جایگزین قدیمی پشتیبانی می‌شود.) |
 | `STORAGE_ENCRYPTION_KEY` | `string` | تولیدشده خودکار | کلید پایدار رمزنگاری در حالت سکون. تغییر این مقدار بدون رمزگشایی اولیه داده‌های قدیمی، محتوای قبلاً رمزنگاری‌شده را غیرقابل‌خواندن می‌کند. |
+| `ADMIN_API_TOKEN` | `string` | تولیدشده خودکار | توکن احراز هویت برای نقاط پایانی API مدیریت محلی. |
 | `VAPID_PUBLIC_KEY` | `string` | تولیدشده خودکار | کلید عمومی Web Push (برای Push notifications موردنیاز است). |
 | `VAPID_PRIVATE_KEY` | `string` | تولیدشده خودکار | کلید خصوصی Web Push (برای Push notifications موردنیاز است). |
 | `VAPID_SUBJECT` | `string` | تولیدشده خودکار | مخاطب برای VAPID (ایمیل یا URL). توسط ارائه‌دهندگان push استفاده می‌شود. |
-| `PUSH_PROXY_URL` | `string` | `""` | نشانی پراکسی برای تحویل Push notification. زمانی استفاده کنید که سرور شما نمی‌تواند مستقیماً به نقاط پایانی سرویس‌های فشاری دسترسی پیدا کند. |
+| `PUSH_PROXY_URL` | `string` | `""` | نشانی پراکسی برای تحویل Push notification. زمانی استفاده کنید که سرور شما نمی‌تواند مستقیماً به نقاط پایانی سرویس‌های push دسترسی پیدا کند. |
 
 :::info
 
@@ -82,6 +84,12 @@ nano .env
 :::
 
 ## اعمال تغییرات {#apply-changes}
+
+:::tip
+
+می‌توانید به‌راحتی فایل ‎.env‎ خود را از طریق [اسکریپت نصب](./Deployment-Script.md) ویرایش کنید و این کار به‌طور خودکار تغییرات را اعمال کرده و اپلیکیشن را برای شما بازسازی می‌کند!
+
+:::
 
 **۱. نصب با Docker:**
 

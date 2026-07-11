@@ -31,7 +31,8 @@
 | ویدیوها پخش نمی‌شوند | ffmpeg / ترنسکد | [ترنسکد ویدیو](#video-transcoding-issues) |
 | بیلد Docker متوقف به‌نظر می‌رسد | دانلود وابستگی | [مشکلات بیلد Docker](#docker-build-issues) |
 | خطاهای TLS/گواهی‌نامه | مسیرهای گواهی‌نامه یا تمدید | [مشکلات TLS / گواهی‌نامه](#tls--certificate-problems) |
-| کانال راه دور بازتاب نمی‌دهد | اعتبارنامه‌های Telegram / صف | [کانال راه دور](#remote-channel-not-mirroring) |
+| کانال ریموت بازتاب نمی‌دهد | اعتبارنامه‌های Telegram / صف | [کانال ریموت](#remote-channel-not-mirroring) |
+| کنترل سرویس پنل مدیریت شکست می‌خورد | مجوزها | [مشکلات پنل مدیریت](#مشکلات-پنل-مدیریت) |
 
 ---
 
@@ -200,18 +201,88 @@ docker compose -f docker-compose.yaml build --no-cache --progress=plain
 
 برای گزینه‌های کامل راه‌اندازی به [گواهی‌نامه‌های SSL](./SSL-Certificates.md) مراجعه کنید.
 
-## کانال راه دور بازتاب نمی‌دهد {#remote-channel-not-mirroring}
+## کانال ریموت بازتاب نمی‌دهد {#remote-channel-not-mirroring}
 
 | بررسی | جزئیات |
 |---|---|
 | فعال‌بودن قابلیت | `REMOTE_CHANNEL=true` باید روی این سرور تنظیم شده باشد. |
 | اعتبارنامه‌های Telegram | API ID، API hash و رشته session باید پیکربندی شوند. `npm run remote:configure` را اجرا کنید. |
-| عمومی‌بودن کانال | کانال راه دور برای کانال‌های خصوصی قفل است. |
+| عمومی‌بودن کانال | کانال ریموت برای کانال‌های خصوصی قفل است. |
 | تاریخچه وارد نشده | در اولین فعال‌سازی، تنها پست‌های منتشرشده پس از آن نقطه بازتاب داده می‌شوند، نه تاریخچه. |
 | صف متوقف شده | با `npm run db:chat:edit -- <channel> --resume-queue` از سر بگیرید. |
 | نیاز به پراکسی | اگر سرور نمی‌تواند به Telegram دسترسی پیدا کند، یک پراکسی تنظیم کنید (`REMOTE_CHANNEL_TELEGRAM_PROXY_URL`). |
 
-برای راهنمای کامل پیکربندی به [راه‌اندازی کانال راه دور](./Remote-Channel-Setup.md) مراجعه کنید.
+برای راهنمای کامل پیکربندی به [راه‌اندازی کانال ریموت](./Remote-Channel-Setup.md) مراجعه کنید.
+
+---
+
+## مشکلات پنل مدیریت {#مشکلات-پنل-مدیریت}
+
+قابلیت‌های کنترل سرویس (ریستارت/توقف) و مشاهده لاگ‌های سیستم در پنل مدیریت بسته به نحوه استقرار Songbird به مجوزهای خاصی نیاز دارند.
+
+:::tip
+
+اگر با هر یک از مشکلات ذکرشده در زیر مواجه شدید، نصب مجدد اپلیکیشن از طریق [اسکریپت نصب](./Deployment-Script.md) باید مشکل را حل کند.
+
+:::
+
+### کنترل سرویس کار نمی‌کند
+
+**استقرارهای Systemd:**
+- کاربر سرویس به مجوزهای `sudo` برای دستورات `systemctl` نیاز دارد
+- یک فایل sudoers برای کاربر songbird ایجاد کنید:
+  ```bash
+  sudo visudo -f /etc/sudoers.d/songbird
+  ```
+- این خطوط را اضافه کنید (اگر از کاربر سرویس متفاوتی استفاده می‌کنید `songbird` را جایگزین کنید):
+  ```
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl restart songbird.service
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl stop songbird.service
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl status songbird.service
+  ```
+- ذخیره کنید و مطمئن شوید مجوزها صحیح هستند:
+  ```bash
+  sudo chmod 0440 /etc/sudoers.d/songbird
+  ```
+
+**استقرارهای PM2:**
+- پروسه باید به runtime PM2 دسترسی داشته باشد
+- اطمینان حاصل کنید PM2 با همان کاربری که Songbird را اجرا می‌کند، در حال اجراست
+- کاربر باید مجوز اجرای `pm2 restart` و `pm2 stop` را داشته باشد
+
+### لاگ‌های سیستم نمایش داده نمی‌شوند
+
+**Systemd:**
+- کاربر سرویس به مجوز خواندن لاگ‌های journal و لاگ‌های nginx نیاز دارد
+- کاربر را به گروه `systemd-journal` اضافه کنید:
+  ```bash
+  sudo usermod -a -G systemd-journal songbird
+  ```
+- کاربر را به گروه `adm` اضافه کنید:
+  ```bash
+  sudo usermod -a -G adm songbird
+  ```
+
+- سرویس را راه‌اندازی مجدد کنید:
+  ```bash
+  sudo systemctl restart songbird
+  ```
+
+**Docker:**
+- اطمینان حاصل کنید که سوکت Docker mount شده است (همانند کنترل سرویس بالا)
+- کانتینر باید برای خواندن لاگ‌ها از طریق API Docker دسترسی داشته باشد
+
+### خطاهای مجوز فایل لاگ
+
+اگر پنل مدیریت نمی‌تواند لاگ‌های ممیزی را در `data/logs/` بنویسد:
+
+```bash
+# اطمینان حاصل کنید دایرکتوری data و زیردایرکتوری‌ها متعلق به کاربر سرویس هستند
+sudo chown -R songbird:songbird /opt/songbird/data
+
+# یا برای نصب‌های Docker، مالکیت مناسب را در volume اطمینان حاصل کنید
+docker compose exec songbird chown -R node:node /app/data
+```
 
 ---
 

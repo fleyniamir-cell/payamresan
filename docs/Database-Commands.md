@@ -29,28 +29,28 @@ A few rules apply across all commands:
 | Command | Purpose |
 |---|---|
 | `npm run db:help` | Print the built-in command guide. |
-| `npm run db:backup` | Create an encrypted backup zip of `.env` and `data/`. |
-| `npm run db:restore` | Restore the database and uploads from a backup zip. |
-| `npm run db:vacuum` | Compact the SQLite database file. |
-| `npm run db:migrate` | Apply pending database migrations. |
-| `npm run db:reset` | Wipe database content and uploaded message files. |
-| `npm run db:delete` | Delete the database file. |
-| `npm run db:inspect` | Print a full summary (users, chats, messages, files, disk). |
-| `npm run db:chat:inspect` | Inspect chats only. |
-| `npm run db:user:inspect` | Inspect users only. |
-| `npm run db:file:inspect` | Inspect files only. |
-| `npm run db:user:create` | Create a single user. |
-| `npm run db:user:generate` | Generate random test users. |
-| `npm run db:user:edit` | Edit a user profile. |
-| `npm run db:user:ban` | Toggle a user's ban state. |
-| `npm run db:user:delete` | Delete one, many, or all users. |
-| `npm run db:chat:create` | Create a group or channel (optionally a Remote Channel). |
-| `npm run db:chat:add` | Add members to a group or channel. |
-| `npm run db:chat:edit` | Edit a chat profile, ownership, or Remote Channel config. |
-| `npm run db:chat:delete` | Delete one, many, or all chats. |
-| `npm run db:file:delete` | Delete uploaded message files and/or avatars. |
-| `npm run db:message:generate` | Generate random messages between two users. |
-| `npm run remote:configure` | Configure Telegram credentials for Remote Channel. |
+| [`npm run db:backup`](#dbbackup) | Create an encrypted backup zip of `.env` and `data/`. |
+| [`npm run db:restore`](#dbrestore) | Restore the database and uploads from a backup zip. |
+| [`npm run db:vacuum`](#dbvacuum) | Compact the SQLite database file. |
+| [`npm run db:migrate`](#dbmigrate) | Apply pending database migrations. |
+| [`npm run db:reset`](#dbreset) | Wipe database content and uploaded message files. |
+| [`npm run db:delete`](#dbdelete) | Delete the database file. |
+| [`npm run db:inspect`](#dbinspect-and-friends) | Print a full summary (users, chats, messages, files, disk). |
+| [`npm run db:chat:inspect`](#dbinspect-and-friends) | Inspect chats only. |
+| [`npm run db:user:inspect`](#dbinspect-and-friends) | Inspect users only. |
+| [`npm run db:file:inspect`](#dbinspect-and-friends) | Inspect files only. |
+| [`npm run db:user:create`](#dbusercreate) | Create a single user. |
+| [`npm run db:user:generate`](#dbusergenerate) | Generate random test users. |
+| [`npm run db:user:edit`](#dbuseredit) | Edit a user profile. |
+| [`npm run db:user:ban`](#dbuserban) | Toggle a user's ban state. |
+| [`npm run db:user:delete`](#dbuserdelete) | Delete one, many, or all users. |
+| [`npm run db:chat:create`](#dbchatcreate) | Create a group or channel (optionally a Remote Channel). |
+| [`npm run db:chat:add`](#dbchatadd) | Add members to a group or channel. |
+| [`npm run db:chat:edit`](#dbchatedit) | Edit a chat profile, ownership, or Remote Channel config. |
+| [`npm run db:chat:delete`](#dbchatdelete) | Delete one, many, or all chats. |
+| [`npm run db:file:delete`](#dbfiledelete) | Delete uploaded message files and/or avatars. |
+| [`npm run db:message:generate`](#dbmessagegenerate) | Generate random messages between two users. |
+| [`npm run remote:configure`](#remote-channel-configuration) | Configure Telegram credentials for Remote Channel. |
 
 ---
 
@@ -189,6 +189,7 @@ Creates a single user. Accepts named flags or three positional arguments (`nickn
 | `--nickname <value>` | 1st | Yes | Display name. Max length follows `NICKNAME_MAX_CHARS`. |
 | `--username <value>` | 2nd | Yes | Lowercase letters, numbers, `.`, `_`. Min 3 chars, max follows `USERNAME_MAX_CHARS`. |
 | `--password <value>` | 3rd | Yes | Account password (bcrypt-hashed on save). |
+| `--role <owner\|admin\|user>` | 4th | No | User role. |
 
 ```bash
 npm run db:user:create -- --nickname "Songbird Sage" --username songbird.sage --password "12345678"
@@ -225,6 +226,7 @@ Edits a user profile. The first positional argument is the user selector (id or 
 | `--avatar-url <value>` | No | Avatar URL, e.g. `/api/uploads/avatars/file.png`. |
 | `--status <online\|invisible>` | No | Presence status. |
 | `--color <#hex>` | No | Profile color, e.g. `#10b981`. |
+| `--role <owner\|admin\|user>` | No | User role. |
 
 ```bash
 npm run db:user:edit -- songbird.sage --nickname "Songbird Sage" --color "#ff6b6b"
@@ -405,6 +407,20 @@ Generates random messages in one chat between two users. Accepts positional argu
 npm run db:message:generate -- 1 songbird.sage songbird.sage2 300 7
 npm run db:message:generate -- --chatId 1 --userA songbird.sage --userB songbird.sage2 --count 300 --days 7
 ```
+
+---
+
+## Remote Channel configuration
+
+### `remote:configure`
+
+Interactively configures Telegram credentials for the Remote Channel feature. This sets up `REMOTE_CHANNEL_TELEGRAM_API_ID`, `REMOTE_CHANNEL_TELEGRAM_API_HASH`, and `REMOTE_CHANNEL_TELEGRAM_SESSION_STRING` in your `.env` file.
+
+```bash
+npm run remote:configure
+```
+
+See [Remote Channel Setup](./Remote-Channel-Setup.md) for the complete guide, including how to obtain API credentials.
 
 ---
 

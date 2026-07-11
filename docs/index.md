@@ -21,13 +21,13 @@ features:
     title: Easy Install
     details: One-line deployment script handles dependencies, build, Nginx, and SSL for you.
     link: /Deployment-Script
-  - icon: 🐳
-    title: Docker or Manual
-    details: Deploy with Docker Compose or a manual systemd setup, whichever fits your server.
-    link: /Installation-Docker
+  - icon: 🛡️
+    title: Admin Panel
+    details: Comprehensive management interface for users, chats, settings, and system operations.
+    link: /Admin-Panel
   - icon: 🔧
     title: Configurable
-    details: Tune ports, uploads, retention, push, and more through environment variables.
+    details: Tune ports, uploads, retention, push, and more through environment variables or admin UI.
     link: /Environment-Variables
   - icon: 📡
     title: Remote Channels
@@ -35,7 +35,7 @@ features:
     link: /Remote-Channel-Setup
   - icon: 🗃️
     title: Database Tools
-    details: Manage users, chats, files, and backups with a full set of CLI commands.
+    details: Manage users, chats, files, and backups with a full set of CLI commands or admin panel.
     link: /Database-Commands
   - icon: 🩺
     title: Troubleshooting

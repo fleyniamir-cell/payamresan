@@ -21,13 +21,13 @@ features:
     title: نصب آسان
     details: اسکریپت نصب تک‌خطی، وابستگی‌ها، build، Nginx و SSL را برای شما مدیریت می‌کند.
     link: /fa/Deployment-Script
-  - icon: 🐳
-    title: Docker یا دستی
-    details: با Docker Compose یا راه‌اندازی دستی systemd نصب کنید، هرکدام که مناسب سرور شماست.
-    link: /fa/Installation-Docker
+  - icon: 🛡️
+    title: پنل مدیریت
+    details: رابط مدیریتی جامع برای کاربران، چت‌ها، تنظیمات و عملیات سیستم.
+    link: /fa/Admin-Panel
   - icon: 🔧
     title: قابل پیکربندی
-    details: پورت‌ها، آپلودها، نگه‌داری فایل‌ها، push و موارد دیگر را از طریق متغیرهای محیطی تنظیم کنید.
+    details: پورت‌ها، آپلودها، نگه‌داری فایل‌ها، push و موارد دیگر را از طریق متغیرهای محیطی یا رابط مدیریت تنظیم کنید.
     link: /fa/Environment-Variables
   - icon: 📡
     title: Remote Channel
@@ -35,7 +35,7 @@ features:
     link: /fa/Remote-Channel-Setup
   - icon: 🗃️
     title: ابزارهای دیتابیس
-    details: کاربران، چت‌ها، فایل‌ها و بکاپ‌ها را با مجموعه‌ای کامل از دستورات CLI مدیریت کنید.
+    details: کاربران، چت‌ها، فایل‌ها و بکاپ‌ها را با دستورات CLI یا پنل مدیریت مدیریت کنید.
     link: /fa/Database-Commands
   - icon: 🩺
     title: عیب‌یابی

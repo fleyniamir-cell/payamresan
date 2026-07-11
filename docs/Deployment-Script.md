@@ -77,14 +77,13 @@ During install the script asks for the core settings and writes them into `.env`
 |---|---|---|
 | Server port | `SERVER_PORT` | `5174` |
 | Client port | `CLIENT_PORT` | `80` |
-| Allow account creation via website | `SIGN_UP` | `true` |
-| Enable file uploads | `FILE_UPLOAD` | `true` |
-| Max total upload size (MB) | `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` | `75` |
-| File auto-deletion interval (days) | `MESSAGE_FILE_RETENTION` | `7` |
-| Text-only message auto-deletion (days) | `MESSAGE_TEXT_RETENTION` | `0` |
 | Email for Let's Encrypt notices (certbot mode) | — | — |
 
 Encryption and push keys (`STORAGE_ENCRYPTION_KEY`, `VAPID_*`) are generated automatically. The full list of variables you can tune later lives in [Environment Variables](./Environment-Variables.md).
+
+### 5. First-run owner creation
+
+After installation completes and the service starts, you'll be prompted to create an owner user on first access. This owner account has full admin panel access for managing users, chats, and system settings. See [Admin Panel](./Admin-Panel.md) for details.
 
 ## Database submenu
 
@@ -120,7 +119,7 @@ You can also restore defaults (clear all mirrors) from the same menu.
 You can use these mirrors in Iran's restricted environment:
 - NodeSource:
 ```
-https://mirror-nodejs.runflare.com/dist/v24.0.0/node-v24.0.0-linux-x64.tar.gz
+https://mirror-nodejs.runflare.com/dist/v24.18.0/node-v24.18.0-linux-x64.tar.gz
 ```
 - APT:
 ```

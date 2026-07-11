@@ -2,7 +2,7 @@
 
 :::tip
 
-You can easily edit your .env file via the [Deployment Script](./Deployment-Script.md) and it would automatically apply and rebuild the app for you!
+You can easily configure most of these variables via the admin panel without touching the `.env` file. Visit [Admin Panel](./Admin-Panel.md) for more information.
 
 :::
 
@@ -23,6 +23,7 @@ nano .env
 | `APP_ENV` | `string` | `production` | Server runtime mode (`production` recommended/default). |
 | `APP_DEBUG` | `boolean` | `false` | Enable verbose server debug logs in terminal/stdout (`[app-debug]` lines for message send/upload/transcode/metadata events). |
 | `SIGN_UP` | `boolean` | `true` | Allow new accounts to be created via the website (`/signup`). (`ACCOUNT_CREATION` is supported as a legacy fallback.) |
+| `ADMIN_PANEL` | `boolean` | `true` | Enable the admin panel interface. When `false`, the admin panel is completely disabled and inaccessible. |
 | `FILE_UPLOAD` | `boolean` | `true` | Enable/disable all uploads globally (chat files + avatars). |
 | `FILE_UPLOAD_MAX_SIZE_MB` | `integer` | `25` | Per-file upload max size (MB). (`FILE_UPLOAD_MAX_SIZE` is supported as a legacy fallback in bytes.) |
 | `FILE_UPLOAD_MAX_TOTAL_SIZE_MB` | `integer` | `75` | Per-message total upload size cap (MB). (`FILE_UPLOAD_MAX_TOTAL_SIZE` is supported as a legacy fallback in bytes.) |
@@ -64,6 +65,7 @@ nano .env
 | `NICKNAME_MAX_CHARS` | `integer` | `24` | Max nickname length for users and groups. (`NICKNAME_MAX` is supported as a legacy fallback.) |
 | `USERNAME_MAX_CHARS` | `integer` | `16` | Max username length for users and groups. (`USERNAME_MAX` is supported as a legacy fallback.) |
 | `STORAGE_ENCRYPTION_KEY` | `string` | auto-generated | Persistent encryption-at-rest key. Changing this value without first decrypting old data will make previously encrypted content unreadable. |
+| `ADMIN_API_TOKEN` | `string` | auto-generated | Authentication token for local admin API endpoints. |
 | `VAPID_PUBLIC_KEY` | `string` | auto-generated | Web Push public key (required for push notifications). |
 | `VAPID_PRIVATE_KEY` | `string` | auto-generated | Web Push private key (required for push notifications). |
 | `VAPID_SUBJECT` | `string` | auto-generated | Contact for VAPID (email or URL). Used by push providers. |
@@ -82,6 +84,12 @@ nano .env
 :::
 
 ## Apply Changes
+
+:::tip
+
+You can easily edit your .env file via the [Deployment Script](./Deployment-Script.md) and it would automatically apply and rebuild the app for you!
+
+:::
 
 **1. Docker deployment:**
 

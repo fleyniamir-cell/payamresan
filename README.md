@@ -9,11 +9,20 @@
 [![Last commit](https://img.shields.io/github/last-commit/bllackbull/Songbird)](https://github.com/bllackbull/Songbird/commits/main/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 
+**Secure, lightweight and self-hosted chat platform**
+
 </div>
 
-**Songbird is a secure and lightweight self-hosted chat platform designed to empower digital freedom worldwide.**
+## Key Features
 
-Songbird supports DMs, groups, channels, file uploads, voice messages, push notifications, and optional Remote Channels that mirror Telegram posts into Songbird channels. The server uses a file-backed SQLite database via sql.js and the client is built with React + Vite.
+- 💬 **Chat Types**: Direct messages, groups, and channels
+- 📁 **Media Support**: File uploads, voice messages, video transcoding
+- 🔔 **Push Notifications**: Web push with VAPID
+- 📡 **Remote Channels**: Mirror Telegram or Songbird channels (v0.10.3+)
+- 🛡️ **Admin Panel**: Full management interface with owner role (v0.11.0+)
+- 🔒 **Security**: Encryption at rest, bcrypt hashing, rate limiting
+- 📱 **PWA**: Installable progressive web app
+- 🌍 **i18n**: English and Persian/Farsi support
 
 ## Quick Start
 
@@ -41,18 +50,20 @@ Full documentation lives at [docs.songbird.website](https://docs.songbird.websit
 - [Manual Installation](https://docs.songbird.website/Manual-Installation)
 - [Configure Nginx](https://docs.songbird.website/Nginx-Configuration)
 - [SSL Certificates](https://docs.songbird.website/SSL-Certificates)
+- [Running behind a CDN](https://docs.songbird.website/CDN-Setup)
+- [Running behind a domain + subpath](https://docs.songbird.website/Subpath-Hosting)
 - [Environment Variables](https://docs.songbird.website/Environment-Variables)
+- [Admin Panel](https://docs.songbird.website/Admin-Panel)
 - [Remote Channel Setup](https://docs.songbird.website/Remote-Channel-Setup)
 - [Push Notification Proxy](https://docs.songbird.website/Push-Notification-Proxy)
 - [Updating the deployed app](https://docs.songbird.website/Updating)
 - [Database Commands](https://docs.songbird.website/Database-Commands)
-- [Running behind a domain + subpath](https://docs.songbird.website/Subpath-Hosting)
 - [Troubleshooting](https://docs.songbird.website/Troubleshooting)
 
 ## Author
 
 - Maintainer: [@bllackbull](https://github.com/bllackbull)
-- Contributors: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos)
+- Contributors: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos), [@iPmartNetwork](https://github.com/iPmartNetwork)
 
 ## Contributing
 

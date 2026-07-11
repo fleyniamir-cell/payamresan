@@ -2,7 +2,7 @@ import {defineConfig} from 'vitepress';
 
 const enSidebar = [
   {
-    text: '📦 Installation & Deployment',
+    text: '📦 Installation',
     collapsed: false,
     items: [
       {text: '🚀 Deployment Script', link: '/Deployment-Script'},
@@ -19,6 +19,7 @@ const enSidebar = [
     collapsed: false,
     items: [
       {text: '🔧 Environment Variables', link: '/Environment-Variables'},
+      {text: '🛡️ Admin Panel', link: '/Admin-Panel'},
       {text: '📡 Remote Channel Setup', link: '/Remote-Channel-Setup'},
       {text: '🔔 Push Notification Proxy', link: '/Push-Notification-Proxy'},
     ],
@@ -53,6 +54,7 @@ const faSidebar = [
     collapsed: false,
     items: [
       {text: '🔧 متغیرهای محیطی', link: '/fa/Environment-Variables'},
+      {text: '🛡️ پنل مدیریت', link: '/fa/Admin-Panel'},
       {text: '📡 راه‌اندازی Remote Channel', link: '/fa/Remote-Channel-Setup'},
       {text: '🔔 پراکسی Push Notification', link: '/fa/Push-Notification-Proxy'},
     ],
@@ -106,7 +108,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           {text: 'Home', link: '/'},
-          {text: 'Get Started', link: '/Deployment-Script'},
+          {text: 'Guide', link: '/Deployment-Script'},
           {text: 'Releases', link: 'https://github.com/bllackbull/Songbird/releases'},
         ],
         sidebar: enSidebar,
@@ -128,7 +130,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           {text: 'خانه', link: '/fa/'},
-          {text: 'شروع کنید', link: '/fa/Deployment-Script'},
+          {text: 'راهنما', link: '/fa/Deployment-Script'},
           {text: 'نسخه‌ها', link: 'https://github.com/bllackbull/Songbird/releases'},
         ],
         sidebar: faSidebar,

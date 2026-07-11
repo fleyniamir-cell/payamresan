@@ -9,11 +9,20 @@
 [![Last commit](https://img.shields.io/github/last-commit/bllackbull/Songbird)](https://github.com/bllackbull/Songbird/commits/main/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](https://opensource.org/licenses/MIT)
 
+**پلتفرم پیام‌رسان امن و سبک برای میزبانی شخصی**
+
 </div>
 
-**Songbird یک پلتفرم پیام‌رسان سبک و امن برای میزبانی شخصی است که با هدف حمایت از آزادی دیجیتال در سراسر جهان ساخته شده است.**
+## قابلیت‌های کلیدی
 
-Songbird از پیام مستقیم، گروه، کانال، آپلود فایل، پیام صوتی، push notification و قابلیت اختیاری Remote Channel برای آینه‌کردن پست‌های Telegram داخل کانال‌های Songbird پشتیبانی می‌کند. سرور از دیتابیس فایل‌محور SQLite از طریق `sql.js` استفاده می‌کند و کلاینت با React + Vite ساخته شده است.
+- 💬 **انواع چت**: پیام مستقیم، گروه و کانال
+- 📁 **پشتیبانی از رسانه**: آپلود فایل، پیام صوتی، تبدیل ویدئو
+- 🔔 **Push Notification**: اعلان وب با VAPID
+- 📡 **کانال‌های ریموت**: آینه‌کردن کانال‌های Telegram یا Songbird (نسخه v0.10.3+)
+- 🛡️ **پنل مدیریت**: رابط مدیریتی کامل با نقش مالک (نسخه v0.11.0+)
+- 🔒 **امنیت**: رمزنگاری، هش bcrypt، محدودیت نرخ
+- 📱 **PWA**: اپلیکیشن وب نصب‌شدنی
+- 🌍 **چندزبانه**: پشتیبانی از انگلیسی و فارسی
 
 ## نصب سریع
 
@@ -41,18 +50,20 @@ songbird-deploy
 - [نصب دستی](https://docs.songbird.website/fa/Manual-Installation)
 - [کانفیگ Nginx](https://docs.songbird.website/fa/Nginx-Configuration)
 - [گواهی‌های SSL](https://docs.songbird.website/fa/SSL-Certificates)
+- [اجرا پشت CDN](https://docs.songbird.website/fa/CDN-Setup)
+- [اجرا روی دامنه + subpath](https://docs.songbird.website/fa/Subpath-Hosting)
 - [متغیرهای محیطی](https://docs.songbird.website/fa/Environment-Variables)
+- [پنل مدیریت](https://docs.songbird.website/fa/Admin-Panel)
 - [راه‌اندازی Remote Channel](https://docs.songbird.website/fa/Remote-Channel-Setup)
 - [پراکسی Push Notification](https://docs.songbird.website/fa/Push-Notification-Proxy)
 - [به‌روزرسانی برنامه](https://docs.songbird.website/fa/Updating)
 - [دستورات دیتابیس](https://docs.songbird.website/fa/Database-Commands)
-- [اجرا روی دامنه + subpath](https://docs.songbird.website/fa/Subpath-Hosting)
 - [عیب‌یابی](https://docs.songbird.website/fa/Troubleshooting)
 
 ## نویسنده
 
 - سازنده: [@bllackbull](https://github.com/bllackbull)
-- مشارکت کنندگان: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos)
+- مشارکت کنندگان: [@nkhalili](https://github.com/nkhalili), [@modos](https://github.com/modos), [@iPmartNetwork](https://github.com/iPmartNetwork)
 
 ## مشارکت
 

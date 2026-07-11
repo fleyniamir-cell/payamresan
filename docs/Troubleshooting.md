@@ -32,6 +32,7 @@ The [deployment script](./Deployment-Script.md) has a built-in **View Logs** men
 | Docker build seems stuck | Dependency download | [Docker build issues](#docker-build-issues) |
 | TLS/certificate errors | Cert paths or renewal | [TLS / certificate problems](#tls--certificate-problems) |
 | Remote Channel not mirroring | Telegram creds / queue | [Remote Channel](#remote-channel-not-mirroring) |
+| Admin panel service control fails | Permissions | [Admin panel issues](#admin-panel-issues) |
 
 ---
 
@@ -212,6 +213,76 @@ See [SSL Certificates](./SSL-Certificates.md) for the full setup options.
 | Proxy needed | If the server cannot reach Telegram, set a proxy (`REMOTE_CHANNEL_TELEGRAM_PROXY_URL`). |
 
 See [Remote Channel Setup](./Remote-Channel-Setup.md) for the complete configuration guide.
+
+---
+
+## Admin panel issues
+
+The admin panel's service control features (restart/stop) and system log viewing require specific permissions depending on how Songbird is deployed.
+
+:::tip
+
+If you encounter any of the issues mentioned below, reinstalling the app via the [Deployment Script](./Deployment-Script.md) should solve the issue.
+
+:::
+
+### Service control not working
+
+**Systemd deployments:**
+- The service user needs `sudo` privileges for `systemctl` commands
+- Create a sudoers file for the songbird user:
+  ```bash
+  sudo visudo -f /etc/sudoers.d/songbird
+  ```
+- Add these lines (replace `songbird` if using a different service user):
+  ```
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl restart songbird.service
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl stop songbird.service
+  songbird ALL=(ALL) NOPASSWD: /bin/systemctl status songbird.service
+  ```
+- Save and ensure permissions are correct:
+  ```bash
+  sudo chmod 0440 /etc/sudoers.d/songbird
+  ```
+
+**PM2 deployments:**
+- The process must have access to the PM2 runtime
+- Ensure PM2 is running as the same user that runs Songbird
+- The user should have permission to execute `pm2 restart` and `pm2 stop`
+
+### System logs not showing
+
+**Systemd:**
+- The service user needs permission to read journal logs and nginx logs
+- Add the user to the `systemd-journal` group:
+  ```bash
+  sudo usermod -a -G systemd-journal songbird
+  ```
+- Add the user to the `adm` group:
+  ```bash
+  sudo usermod -a -G adm songbird
+  ```
+
+- Restart the service:
+  ```bash
+  sudo systemctl restart songbird
+  ```
+
+**Docker:**
+- Ensure the Docker socket is mounted (same as service control above)
+- The container needs access to read logs via the Docker API
+
+### Log file permission errors
+
+If the admin panel cannot write audit logs to `data/logs/`:
+
+```bash
+# Ensure the data directory and subdirectories are owned by the service user
+sudo chown -R songbird:songbird /opt/songbird/data
+
+# Or for Docker installs, ensure proper ownership in the volume
+docker compose exec songbird chown -R node:node /app/data
+```
 
 ---
 

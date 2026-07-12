@@ -20,7 +20,7 @@ RUN npm config set registry https://registry.npmjs.org/ \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
   && npm config set fetch-timeout 300000 \
-  && npm ci --omit=dev --no-audit --no-fund --loglevel=verbose
+  && npm install --omit=dev --no-audit --no-fund --loglevel=verbose
 
 FROM node:24-bookworm-slim
 WORKDIR /app
